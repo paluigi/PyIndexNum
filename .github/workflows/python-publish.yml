@@ -24,7 +24,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v1
         with:
-          python-version: "3.11"
+          version: "3.11"
 
       - name: Build release distributions
         run: |

@@ -279,22 +279,9 @@ def aggregate_time(
     elif agg_type == "weighted_arithmetic":
         agg_exprs.append(weighted_arithmetic_mean_expr(price_col, quantity_col).alias("aggregated_price"))
     elif agg_type == "weighted_geometric":
-        # For weighted geometric, the direct formula is price^(weight/total_weight)
-        # Here we'll use a simple approach with implicit weight normalization: geometric mean weighted by quantity shares
-        total_qty = pl.col(quantity_col).sum()
-        weight_share = pl.col(quantity_col) / total_qty
-        weighted_geom = (
-            pl.when(pl.col(price_col) > 0)
-            .then((pl.col(price_col).log() * weight_share).sum().exp())
-            .otherwise(None)
-        )
-        agg_exprs.append(weighted_geom.alias("aggregated_price"))
+        agg_exprs.append(weighted_geometric_mean_expr(price_col, quantity_col).alias("aggregated_price"))
     elif agg_type == "weighted_harmonic":
-        # Weighted harmonic mean: sum(quantities) / sum(quantities / prices)
-        agg_exprs.append(
-            (pl.col(quantity_col).sum() / (pl.col(quantity_col) / pl.col(price_col)).sum())
-            .alias("aggregated_price")
-        )
+        agg_exprs.append(weighted_harmonic_mean_expr(price_col, quantity_col).alias("aggregated_price"))
 
     # Quantity aggregation (always sum if provided)
     if quantity_col:
@@ -389,3 +376,123 @@ def get_summary(df: pl.DataFrame) -> dict:
         "end_date": end_date,
         "quantity": quantity_present
     }
+
+
+def carry_forward_imputation(
+    df: pl.DataFrame,
+    value_cols: list[str],
+    id_col: str = "product_id",
+    time_col: str = "period"
+) -> pl.DataFrame:
+    """
+    Create balanced panel and fill missing values using forward imputation.
+
+    This function creates a balanced panel dataset by generating all possible
+    combinations of product IDs and time periods, then fills missing values
+    by carrying forward the last available observation for each product.
+
+    Args:
+        df: Input polars DataFrame with aggregated data (may be unbalanced).
+        value_cols: List of column names to impute (e.g., ["aggregated_price", "aggregated_quantity"]).
+        id_col: Name of the column containing unique identifiers (default "product_id").
+        time_col: Name of the column containing time periods (default "period").
+
+    Returns:
+        Balanced DataFrame with all product-period combinations and nulls filled using forward imputation.
+
+    Raises:
+        ValueError: If required columns are missing from the DataFrame.
+
+    Examples:
+        >>> df = pl.DataFrame({
+        ...     "product_id": ["A", "A", "B"],
+        ...     "period": [pl.date(2023, 1, 1), pl.date(2023, 2, 1), pl.date(2023, 1, 1)],
+        ...     "aggregated_price": [100.0, 110.0, 200.0]
+        ... })
+        >>> result = carry_forward_imputation(df, ["aggregated_price"])
+        >>> # Creates balanced panel: A in both periods, B in both periods
+        >>> # A: 100.0, 110.0; B: 200.0, 200.0 (forward filled)
+    """
+    # Validate required columns
+    required_cols = [id_col, time_col] + value_cols
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+
+    # Get all unique product IDs and periods
+    unique_ids = df.select(id_col).unique()
+    unique_periods = df.select(time_col).unique()
+
+    # Create balanced grid (cross product of all IDs and periods)
+    grid = unique_ids.join(unique_periods, how="cross")
+
+    # Left join the input data to the grid
+    balanced_df = grid.join(df, on=[id_col, time_col], how="left")
+
+    # Apply forward fill for each value column
+    for col in value_cols:
+        balanced_df = balanced_df.with_columns(
+            pl.col(col).fill_null(strategy="forward").over(id_col, order_by=time_col).alias(col)
+        )
+
+    return balanced_df
+
+
+def carry_backward_imputation(
+    df: pl.DataFrame,
+    value_cols: list[str],
+    id_col: str = "product_id",
+    time_col: str = "period"
+) -> pl.DataFrame:
+    """
+    Create balanced panel and fill missing values using backward imputation.
+
+    This function creates a balanced panel dataset by generating all possible
+    combinations of product IDs and time periods, then fills missing values
+    by carrying backward the first future observation for each product.
+
+    Args:
+        df: Input polars DataFrame with aggregated data (may be unbalanced).
+        value_cols: List of column names to impute (e.g., ["aggregated_price", "aggregated_quantity"]).
+        id_col: Name of the column containing unique identifiers (default "product_id").
+        time_col: Name of the column containing time periods (default "period").
+
+    Returns:
+        Balanced DataFrame with all product-period combinations and nulls filled using backward imputation.
+
+    Raises:
+        ValueError: If required columns are missing from the DataFrame.
+
+    Examples:
+        >>> df = pl.DataFrame({
+        ...     "product_id": ["A", "A", "B"],
+        ...     "period": [pl.date(2023, 1, 1), pl.date(2023, 2, 1), pl.date(2023, 1, 1)],
+        ...     "aggregated_price": [100.0, 110.0, 200.0]
+        ... })
+        >>> result = carry_backward_imputation(df, ["aggregated_price"])
+        >>> # Creates balanced panel: A in both periods, B in both periods
+        >>> # A: 100.0, 110.0; B: 200.0, 200.0 (no fill needed)
+    """
+    # Validate required columns
+    required_cols = [id_col, time_col] + value_cols
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+
+    # Get all unique product IDs and periods
+    unique_ids = df.select(id_col).unique()
+    unique_periods = df.select(time_col).unique()
+
+    # Create balanced grid (cross product of all IDs and periods)
+    grid = unique_ids.join(unique_periods, how="cross")
+
+    # Left join the input data to the grid
+    balanced_df = grid.join(df, on=[id_col, time_col], how="left")
+
+    # Apply backward fill for each value column
+    for col in value_cols:
+        balanced_df = balanced_df.with_columns(
+            pl.col(col).fill_null(strategy="backward").over(id_col, order_by=time_col).alias(col)
+        )
+
+    return balanced_df

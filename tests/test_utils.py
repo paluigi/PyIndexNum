@@ -7,7 +7,7 @@ import pytest
 from pathlib import Path
 from datetime import date
 
-from src.pyindexnum.utils import aggregate_time, standardize_columns, get_summary, remove_unbalanced
+from pyindexnum.utils import aggregate_time, standardize_columns, get_summary, remove_unbalanced, carry_forward_imputation, carry_backward_imputation
 
 
 @pytest.fixture
@@ -656,3 +656,224 @@ class TestRemoveUnbalanced:
 
         with pytest.raises(ValueError, match="Missing required columns"):
             remove_unbalanced(df)
+
+
+@pytest.fixture
+def unbalanced_aggregated_data():
+    """Create unbalanced aggregated data for imputation testing."""
+    return pl.DataFrame({
+        "product_id": ["A", "A", "B", "C", "C"],
+        "period": [
+            date(2023, 1, 1), date(2023, 2, 1),  # A has both periods
+            date(2023, 1, 1),  # B missing period 2
+            date(2023, 1, 1), date(2023, 2, 1)   # C has both periods
+        ],
+        "aggregated_price": [100.0, 110.0, 200.0, 300.0, 320.0],
+        "aggregated_quantity": [10, 12, 15, 20, 22]
+    })
+
+
+class TestCarryForwardImputation:
+    """Test suite for carry_forward_imputation function."""
+
+    def test_basic_forward_fill_creates_balanced_panel(self, unbalanced_aggregated_data):
+        """Test that forward imputation creates balanced panel and fills missing values."""
+        result = carry_forward_imputation(
+            unbalanced_aggregated_data,
+            value_cols=["aggregated_price", "aggregated_quantity"]
+        )
+
+        # Should have 6 rows: 3 products × 2 periods
+        assert len(result) == 6
+        assert result.columns == ["product_id", "period", "aggregated_price", "aggregated_quantity"]
+
+        # Check product A (already complete)
+        a_data = result.filter(pl.col("product_id") == "A").sort("period")
+        assert a_data["aggregated_price"].to_list() == [100.0, 110.0]
+        assert a_data["aggregated_quantity"].to_list() == [10, 12]
+
+        # Check product B (missing period 2, should be forward filled)
+        b_data = result.filter(pl.col("product_id") == "B").sort("period")
+        assert b_data["aggregated_price"].to_list() == [200.0, 200.0]  # Forward filled
+        assert b_data["aggregated_quantity"].to_list() == [15, 15]  # Forward filled
+
+        # Check product C (already complete)
+        c_data = result.filter(pl.col("product_id") == "C").sort("period")
+        assert c_data["aggregated_price"].to_list() == [300.0, 320.0]
+        assert c_data["aggregated_quantity"].to_list() == [20, 22]
+
+    def test_forward_fill_only_price(self, unbalanced_aggregated_data):
+        """Test forward imputation on price only."""
+        result = carry_forward_imputation(
+            unbalanced_aggregated_data,
+            value_cols=["aggregated_price"]
+        )
+
+        # Quantity should remain as is (with nulls for missing periods)
+        b_data = result.filter(pl.col("product_id") == "B").sort("period")
+        assert b_data["aggregated_price"].to_list() == [200.0, 200.0]
+        assert b_data["aggregated_quantity"].to_list() == [15, None]  # Not filled
+
+    def test_forward_fill_no_missing_periods(self):
+        """Test forward fill when data is already balanced."""
+        balanced_data = pl.DataFrame({
+            "product_id": ["A", "A", "B", "B"],
+            "period": [
+                date(2023, 1, 1), date(2023, 2, 1),
+                date(2023, 1, 1), date(2023, 2, 1)
+            ],
+            "aggregated_price": [100.0, 110.0, 200.0, 210.0]
+        })
+
+        result = carry_forward_imputation(balanced_data, ["aggregated_price"])
+
+        # Should remain unchanged (sort to ensure consistent order)
+        result_sorted = result.sort(["product_id", "period"])
+        assert len(result_sorted) == 4
+        assert result_sorted["aggregated_price"].to_list() == [100.0, 110.0, 200.0, 210.0]
+
+    def test_forward_fill_custom_columns(self, unbalanced_aggregated_data):
+        """Test forward imputation with custom column names."""
+        custom_data = unbalanced_aggregated_data.rename({
+            "product_id": "prod",
+            "period": "time",
+            "aggregated_price": "price"
+        })
+
+        result = carry_forward_imputation(
+            custom_data,
+            value_cols=["price"],
+            id_col="prod",
+            time_col="time"
+        )
+
+        # Should have created balanced panel
+        assert len(result) == 6
+        b_data = result.filter(pl.col("prod") == "B").sort("time")
+        assert b_data["price"].to_list() == [200.0, 200.0]
+
+    def test_forward_fill_missing_required_columns(self):
+        """Test error when required columns are missing."""
+        df = pl.DataFrame({
+            "product_id": ["A"],
+            "aggregated_price": [100.0]
+            # Missing period
+        })
+
+        with pytest.raises(ValueError, match="Missing required columns"):
+            carry_forward_imputation(df, ["aggregated_price"])
+
+    def test_forward_fill_leading_nulls_remain(self):
+        """Test that leading nulls (no previous value) remain null."""
+        data_with_leading_nulls = pl.DataFrame({
+            "product_id": ["A", "A"],
+            "period": [date(2023, 1, 1), date(2023, 2, 1)],
+            "aggregated_price": [None, 110.0]  # Leading null
+        })
+
+        result = carry_forward_imputation(data_with_leading_nulls, ["aggregated_price"])
+
+        # Leading null should remain null, second value filled
+        a_data = result.filter(pl.col("product_id") == "A").sort("period")
+        assert a_data["aggregated_price"].to_list() == [None, 110.0]
+
+
+class TestCarryBackwardImputation:
+    """Test suite for carry_backward_imputation function."""
+
+    def test_basic_backward_fill_creates_balanced_panel(self, unbalanced_aggregated_data):
+        """Test that backward imputation creates balanced panel and fills missing values."""
+        result = carry_backward_imputation(
+            unbalanced_aggregated_data,
+            value_cols=["aggregated_price", "aggregated_quantity"]
+        )
+
+        # Should have 6 rows: 3 products × 2 periods
+        assert len(result) == 6
+
+        # Check product A (already complete)
+        a_data = result.filter(pl.col("product_id") == "A").sort("period")
+        assert a_data["aggregated_price"].to_list() == [100.0, 110.0]
+
+        # Check product B (missing period 2, no future data so remains null)
+        b_data = result.filter(pl.col("product_id") == "B").sort("period")
+        assert b_data["aggregated_price"].to_list() == [200.0, None]  # Not filled (no future value)
+        assert b_data["aggregated_quantity"].to_list() == [15, None]  # Not filled (no future value)
+
+        # Check product C (already complete)
+        c_data = result.filter(pl.col("product_id") == "C").sort("period")
+        assert c_data["aggregated_price"].to_list() == [300.0, 320.0]
+
+    def test_backward_fill_only_quantity(self, unbalanced_aggregated_data):
+        """Test backward imputation on quantity only."""
+        result = carry_backward_imputation(
+            unbalanced_aggregated_data,
+            value_cols=["aggregated_quantity"]
+        )
+
+        b_data = result.filter(pl.col("product_id") == "B").sort("period")
+        assert b_data["aggregated_quantity"].to_list() == [15, None]  # Not filled (no future value)
+        assert b_data["aggregated_price"].to_list() == [200.0, None]  # Not filled
+
+    def test_backward_fill_no_missing_periods(self):
+        """Test backward fill when data is already balanced."""
+        balanced_data = pl.DataFrame({
+            "product_id": ["A", "A", "B", "B"],
+            "period": [
+                date(2023, 1, 1), date(2023, 2, 1),
+                date(2023, 1, 1), date(2023, 2, 1)
+            ],
+            "aggregated_price": [100.0, 110.0, 200.0, 210.0]
+        })
+
+        result = carry_backward_imputation(balanced_data, ["aggregated_price"])
+
+        # Should remain unchanged (sort to ensure consistent order)
+        result_sorted = result.sort(["product_id", "period"])
+        assert len(result_sorted) == 4
+        assert result_sorted["aggregated_price"].to_list() == [100.0, 110.0, 200.0, 210.0]
+
+    def test_backward_fill_custom_columns(self, unbalanced_aggregated_data):
+        """Test backward imputation with custom column names."""
+        custom_data = unbalanced_aggregated_data.rename({
+            "product_id": "prod",
+            "period": "time",
+            "aggregated_price": "price"
+        })
+
+        result = carry_backward_imputation(
+            custom_data,
+            value_cols=["price"],
+            id_col="prod",
+            time_col="time"
+        )
+
+        # Should have created balanced panel
+        assert len(result) == 6
+        b_data = result.filter(pl.col("prod") == "B").sort("time")
+        assert b_data["price"].to_list() == [200.0, None]  # Not filled (no future value)
+
+    def test_backward_fill_missing_required_columns(self):
+        """Test error when required columns are missing."""
+        df = pl.DataFrame({
+            "product_id": ["A"],
+            "aggregated_price": [100.0]
+            # Missing period
+        })
+
+        with pytest.raises(ValueError, match="Missing required columns"):
+            carry_backward_imputation(df, ["aggregated_price"])
+
+    def test_backward_fill_trailing_nulls_remain(self):
+        """Test that trailing nulls (no future value) remain null."""
+        data_with_trailing_nulls = pl.DataFrame({
+            "product_id": ["A", "A"],
+            "period": [date(2023, 1, 1), date(2023, 2, 1)],
+            "aggregated_price": [100.0, None]  # Trailing null
+        })
+
+        result = carry_backward_imputation(data_with_trailing_nulls, ["aggregated_price"])
+
+        # Trailing null should remain null
+        a_data = result.filter(pl.col("product_id") == "A").sort("period")
+        assert a_data["aggregated_price"].to_list() == [100.0, None]

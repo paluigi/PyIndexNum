@@ -9,7 +9,7 @@ These methods are used to extend price index series when using rolling windows.
 import polars as pl
 import numpy as np
 from typing import Tuple, List
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 
 def movement_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
@@ -25,7 +25,7 @@ def movement_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
         index2: Second multilateral index DataFrame with columns "period" and "index_value"
 
     Returns:
-        DataFrame with the extended index including the spliced period
+        DataFrame with the full extended index series including all periods from index1 plus the spliced period
 
     Raises:
         ValueError: If input validation fails
@@ -42,7 +42,7 @@ def movement_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
         ...     "index_value": [1.05, 1.10, 1.15]
         ... })
         >>> result = movement_splice(idx1, idx2)
-        >>> # Returns extended index with period 2023-04-01
+        >>> # Returns the full extended index series including periods 2023-01-01, 2023-02-01, 2023-03-01, and 2023-04-01
     """
     _validate_indices(index1, index2)
 
@@ -70,7 +70,8 @@ def movement_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
         "index_value": [spliced_index]
     })
 
-    return spliced_df
+    # Return the full extended series
+    return pl.concat([index1, spliced_df])
 
 
 def window_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
@@ -79,15 +80,14 @@ def window_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
 
     The window splice method calculates the rate of change between the last
     and first period of the second window, then uses this rate to connect
-    with the second period of the first window and calculate the index for
-    the additional period.
+    the second period of the first window to the last period of the second window.
 
     Args:
         index1: First multilateral index DataFrame with columns "period" and "index_value"
         index2: Second multilateral index DataFrame with columns "period" and "index_value"
 
     Returns:
-        DataFrame with the extended index including the spliced period
+        DataFrame with the full extended index series including all periods from index1 plus the spliced period
 
     Raises:
         ValueError: If input validation fails
@@ -103,8 +103,8 @@ def window_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
         ...     "period": [date(2023, 2, 1), date(2023, 3, 1), date(2023, 4, 1)],
         ...     "index_value": [1.05, 1.10, 1.15]
         ... })
-        >>> result = window_splice(idx1, index2)
-        >>> # Returns extended index with period 2023-04-01
+        >>> result = window_splice(idx1, idx2)
+        >>> # Returns the full extended index series including periods 2023-01-01, 2023-02-01, 2023-03-01, and 2023-04-01
     """
     _validate_indices(index1, index2)
 
@@ -112,27 +112,18 @@ def window_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
     sorted_idx1 = index1.sort("period")
     sorted_idx2 = index2.sort("period")
 
-    first_period_idx1 = sorted_idx1.select(pl.col("period").min()).item()
     second_period_idx1 = sorted_idx1.select(pl.col("period")).to_series()[1]
-    last_period_idx1 = sorted_idx1.select(pl.col("period").max()).item()
-
-    first_period_idx2 = sorted_idx2.select(pl.col("period").min()).item()
     last_period_idx2 = sorted_idx2.select(pl.col("period").max()).item()
 
-    first_index_idx1 = sorted_idx1.filter(pl.col("period") == first_period_idx1).select("index_value").item()
     second_index_idx1 = sorted_idx1.filter(pl.col("period") == second_period_idx1).select("index_value").item()
-    last_index_idx1 = sorted_idx1.filter(pl.col("period") == last_period_idx1).select("index_value").item()
-
-    first_index_idx2 = sorted_idx2.filter(pl.col("period") == first_period_idx2).select("index_value").item()
+    first_index_idx2 = sorted_idx2.select(pl.col("index_value")).to_series()[0]
     last_index_idx2 = sorted_idx2.filter(pl.col("period") == last_period_idx2).select("index_value").item()
 
-    # Calculate window rate of change
+    # Calculate window rate of change (from first to last period in index2)
     window_rate = last_index_idx2 / first_index_idx2
 
-    # Calculate spliced index using the connection point
-    # The rate from first to second period in index1 is used as base
-    base_rate = second_index_idx1 / first_index_idx1
-    spliced_index = last_index_idx1 * window_rate * base_rate
+    # Calculate spliced index by applying the window rate to the second period of index1
+    spliced_index = second_index_idx1 * window_rate
 
     # Create result DataFrame
     spliced_df = pl.DataFrame({
@@ -140,7 +131,8 @@ def window_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
         "index_value": [spliced_index]
     })
 
-    return spliced_df
+    # Return the full extended series
+    return pl.concat([index1, spliced_df])
 
 
 def half_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
@@ -148,15 +140,14 @@ def half_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
     Calculate the half splice extension method.
 
     The half splice method uses the period in the middle of the first window
-    as the connecting point. This method requires that the window length
-    be odd, otherwise it raises an error.
+    (T/2 if the window is even, T/2+1 if the window is odd) as the connecting point.
 
     Args:
         index1: First multilateral index DataFrame with columns "period" and "index_value"
         index2: Second multilateral index DataFrame with columns "period" and "index_value"
 
     Returns:
-        DataFrame with the extended index including the spliced period
+        DataFrame with the full extended index series including all periods from index1 plus the spliced period
 
     Raises:
         ValueError: If input validation fails or window length is even
@@ -173,38 +164,36 @@ def half_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
         ...     "index_value": [1.05, 1.10, 1.15]
         ... })
         >>> result = half_splice(idx1, idx2)
-        >>> # Returns extended index with period 2023-04-01
+        >>> # Returns the full extended index series including periods 2023-01-01, 2023-02-01, 2023-03-01, and 2023-04-01
     """
     _validate_indices(index1, index2)
 
-    # Check if window length is odd
+    # Get middle period of index1
     window_length = index1.height
     if window_length % 2 == 0:
-        raise ValueError("Half splice method requires an odd window length")
+        # Python is zero-based for indexing
+        middle_idx = (window_length // 2) - 1
+    else:
+        middle_idx = window_length // 2
 
-    # Get middle period of index1
-    middle_idx = window_length // 2
+
     sorted_idx1 = index1.sort("period")
     middle_period_idx1 = sorted_idx1.select(pl.col("period")).to_series()[middle_idx]
     middle_index_idx1 = sorted_idx1.filter(pl.col("period") == middle_period_idx1).select("index_value").item()
 
-    # Get corresponding period in index2
+    # Get the same period from index2 (should be the overlapping middle period)
     sorted_idx2 = index2.sort("period")
-    middle_period_idx2 = sorted_idx2.select(pl.col("period")).to_series()[middle_idx]
-    middle_index_idx2 = sorted_idx2.filter(pl.col("period") == middle_period_idx2).select("index_value").item()
+    middle_index_idx2 = sorted_idx2.filter(pl.col("period") == middle_period_idx1).select("index_value").item()
 
-    # Get last periods
-    last_period_idx1 = sorted_idx1.select(pl.col("period").max()).item()
+    # Get last period for index2
     last_period_idx2 = sorted_idx2.select(pl.col("period").max()).item()
-
-    last_index_idx1 = sorted_idx1.filter(pl.col("period") == last_period_idx1).select("index_value").item()
     last_index_idx2 = sorted_idx2.filter(pl.col("period") == last_period_idx2).select("index_value").item()
 
-    # Calculate rate of change in index2 around middle period
-    # Find the rate from middle to last period in index2
+    # Calculate rate of change in index2 from middle to last period
     middle_to_last_rate = last_index_idx2 / middle_index_idx2
 
-    # Apply this rate to extend from middle of index1 to last of index2
+    # Apply this rate to the middle period of index1 to get the spliced index
+    # The spliced index = middle_index_idx1 * middle_to_last_rate
     spliced_index = middle_index_idx1 * middle_to_last_rate
 
     # Create result DataFrame
@@ -213,7 +202,8 @@ def half_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
         "index_value": [spliced_index]
     })
 
-    return spliced_df
+    # Return the full extended series
+    return pl.concat([index1, spliced_df])
 
 
 def mean_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
@@ -229,7 +219,7 @@ def mean_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
         index2: Second multilateral index DataFrame with columns "period" and "index_value"
 
     Returns:
-        DataFrame with the extended index including the spliced period
+        DataFrame with the full extended index series including all periods from index1 plus the spliced period
 
     Raises:
         ValueError: If input validation fails
@@ -246,7 +236,7 @@ def mean_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
         ...     "index_value": [1.05, 1.10, 1.15]
         ... })
         >>> result = mean_splice(idx1, idx2)
-        >>> # Returns extended index with period 2023-04-01
+        >>> # Returns the full extended index series including periods 2023-01-01, 2023-02-01, 2023-03-01, and 2023-04-01
     """
     _validate_indices(index1, index2)
 
@@ -260,44 +250,31 @@ def mean_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
 
     overlapping_periods = periods_idx1.intersection(periods_idx2)
 
-    if not overlapping_periods:
-        raise ValueError("No overlapping periods found between the two indices")
+    # Get last period for index2
+    last_period_idx2 = sorted_idx2.select(pl.col("period").max()).item()
+    last_index_idx2 = sorted_idx2.filter(pl.col("period") == last_period_idx2).select("index_value").item()
 
-    # Calculate splicing rates for each overlapping period
-    splice_rates = []
+    # Calculate splicing indices for each overlapping period
+    splice_list = []
 
     for period in overlapping_periods:
         # Get index values for this period in both indices
         idx1_value = sorted_idx1.filter(pl.col("period") == period).select("index_value").item()
         idx2_value = sorted_idx2.filter(pl.col("period") == period).select("index_value").item()
 
-        # Get the last period values
-        last_period_idx1 = sorted_idx1.select(pl.col("period").max()).item()
-        last_period_idx2 = sorted_idx2.select(pl.col("period").max()).item()
+        # Calculate rate of change in index2 from this to last period
+        current_to_last_rate = last_index_idx2 / idx2_value
 
-        last_idx1_value = sorted_idx1.filter(pl.col("period") == last_period_idx1).select("index_value").item()
-        last_idx2_value = sorted_idx2.filter(pl.col("period") == last_period_idx2).select("index_value").item()
+        # Apply this rate to the current period of index1 to get the current spliced index
+        spliced_current = idx1_value * current_to_last_rate
+        splice_list.append(spliced_current)
 
-        # Calculate rate from this period to last period in each index
-        rate_idx1 = last_idx1_value / idx1_value
-        rate_idx2 = last_idx2_value / idx2_value
 
-        # Calculate splicing rate for this period
-        splice_rate = rate_idx2 / rate_idx1
-        splice_rates.append(splice_rate)
+    # Calculate geometric mean of all splicing indices
+    if not splice_list:
+        raise ValueError("No valid splicing index calculated")
 
-    # Calculate geometric mean of all splicing rates
-    if not splice_rates:
-        raise ValueError("No valid splicing rates calculated")
-
-    geometric_mean_rate = np.exp(np.mean(np.log(splice_rates)))
-
-    # Get the last index value from index1
-    last_period_idx1 = sorted_idx1.select(pl.col("period").max()).item()
-    last_index_idx1 = sorted_idx1.filter(pl.col("period") == last_period_idx1).select("index_value").item()
-
-    # Calculate spliced index
-    spliced_index = last_index_idx1 * geometric_mean_rate
+    spliced_index = np.exp(np.mean(np.log(splice_list)))
 
     # Create result DataFrame
     last_period_idx2 = sorted_idx2.select(pl.col("period").max()).item()
@@ -306,7 +283,71 @@ def mean_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
         "index_value": [spliced_index]
     })
 
-    return spliced_df
+    # Return the full extended series
+    return pl.concat([index1, spliced_df])
+
+
+def fixed_base_rolling_window(index1: pl.DataFrame, index2: pl.DataFrame, base_period: str) -> pl.DataFrame:
+    """
+    Calculate the fixed base rolling window extension method.
+
+    The fixed base rolling method calculates the rate of change between the last
+    period of the second window and a reference period common to the first and 
+    second window, then uses this rate to connect the base period of the first 
+    window to the last period of the second window.
+
+    Args:
+        index1: First multilateral index DataFrame with columns "period" and "index_value"
+        index2: Second multilateral index DataFrame with columns "period" and "index_value"
+        base_period: string indicating the date of the base period in YYYY-MM-DD format
+
+    Returns:
+        DataFrame with the full extended index series including all periods from index1 plus the spliced period
+
+    Raises:
+        ValueError: If input validation fails
+
+    Examples:
+        >>> import polars as pl
+        >>> from datetime import date
+        >>> idx1 = pl.DataFrame({
+        ...     "period": [date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1)],
+        ...     "index_value": [1.0, 1.05, 1.10]
+        ... })
+        >>> idx2 = pl.DataFrame({
+        ...     "period": [date(2023, 2, 1), date(2023, 3, 1), date(2023, 4, 1)],
+        ...     "index_value": [1.05, 1.10, 1.15]
+        ... })
+        >>> result = fixed_base_rolling_window(idx1, idx2, "2023-02-01")
+        >>> # Returns the full extended index series including periods 2023-01-01, 2023-02-01, 2023-03-01, and 2023-04-01
+    """
+    _validate_indices(index1, index2)
+
+    # Get periods and indices
+    sorted_idx1 = index1.sort("period")
+    sorted_idx2 = index2.sort("period")
+
+    base_period_date = datetime.strptime(base_period, "%Y-%m-%d").date()
+    last_period_idx2 = sorted_idx2.select(pl.col("period").max()).item()
+
+    base_index_idx1 = sorted_idx1.filter(pl.col("period") == base_period_date).select("index_value").item()
+    base_index_idx2 = sorted_idx2.filter(pl.col("period") == base_period_date).select("index_value").item()
+    last_index_idx2 = sorted_idx2.filter(pl.col("period") == last_period_idx2).select("index_value").item()
+
+    # Calculate link rate of change (from base period to last period in index2)
+    link_rate = last_index_idx2 / base_index_idx1
+
+    # Calculate spliced index by applying the window rate to the second period of index1
+    spliced_index = base_index_idx2 * link_rate
+
+    # Create result DataFrame
+    spliced_df = pl.DataFrame({
+        "period": [last_period_idx2],
+        "index_value": [spliced_index]
+    })
+
+    # Return the full extended series
+    return pl.concat([index1, spliced_df])
 
 
 def _validate_indices(index1: pl.DataFrame, index2: pl.DataFrame) -> None:
@@ -356,18 +397,25 @@ def _validate_indices(index1: pl.DataFrame, index2: pl.DataFrame) -> None:
     periods1 = set(index1.select("period").to_series().to_list())
     periods2 = set(index2.select("period").to_series().to_list())
 
-    # Find the shift by checking the difference in first periods
-    first_period1 = min(periods1)
-    first_period2 = min(periods2)
-
     # Calculate expected shift (should be one period)
-    # This assumes regular frequency, but we'll check the actual overlap
     overlap = periods1.intersection(periods2)
     non_overlap1 = periods1 - periods2
     non_overlap2 = periods2 - periods1
 
+    # Check that the non overlapping periods are the begin of th e first and end of the second
+    first_period1 = min(periods1)
+    last_period2 = max(periods2)
+    if first_period1 not in non_overlap1 or last_period2 not in non_overlap2:
+        raise ValueError("The non-overlappting periods must be the first of index1 and last of index2")
+
+    # Check that exactly one period is unique to each index (shifted by one period)
+    # For some edge cases (like no overlapping periods), raise a different error
     if len(non_overlap1) != 1 or len(non_overlap2) != 1:
-        raise ValueError("Indices must be shifted by exactly one period")
+        # Check if this is a case where there are no overlapping periods
+        if len(overlap) == 0:
+            raise ValueError("Indices must be overlapped")
+        else:
+            raise ValueError("Indices must be shifted by exactly one period")
 
     # Check that all index values are positive
     for i, df in enumerate([index1, index2], 1):

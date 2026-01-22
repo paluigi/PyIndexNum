@@ -4,8 +4,8 @@ Tests for bilateral price index functions.
 
 import pytest
 import polars as pl
-from src.pyindexnum.bilateral import jevons, dudot, carli, laspeyres, paasche, fisher, tornqvist, walsh
-from src.pyindexnum.utils import standardize_columns, aggregate_time
+from pyindexnum.bilateral import jevons, dudot, carli, laspeyres, paasche, fisher, tornqvist, walsh
+from pyindexnum.utils import standardize_columns, aggregate_time
 
 
 @pytest.fixture

@@ -2,8 +2,8 @@
 
 # -- Project information -----------------------------------------------------
 project = 'PyIndexNum'
-copyright = '2024, Luigi'
-author = 'Luigi'
+copyright = '2026, Luigi Palumbo & Mengting Yu'
+author = 'Luigi Palumbo, Mengting Yu'
 release = '0.1.0'
 
 # -- General configuration ---------------------------------------------------
@@ -22,6 +22,7 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # -- Options for HTML output -------------------------------------------------
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
+html_css_files = ['custom.css']
 
 # -- Extension configuration --------------------------------------------------
 # Autodoc settings

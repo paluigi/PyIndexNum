@@ -1,0 +1,10 @@
+/* Custom CSS to fix nested field list indentation in API documentation */
+
+/* Reset left margins for nested field lists to prevent progressive indentation */
+.myst .field-list .field-list {
+    margin-left: 0;
+}
+
+.myst .field-list .field-list dd {
+    margin-left: 0;
+}

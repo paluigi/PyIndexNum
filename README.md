@@ -68,7 +68,7 @@ fisher_idx = pin.fisher(df_balanced)
 geks_fisher_idx = pin.geks_fisher(df_agg)
 
 # 6. Apply extension methods (optional)
-extended_idx = pin.movement_splice(df_agg, base_indices=[1.0, 1.05, 1.12])
+extended_idx = pin.movement_splice(geks_fisher_idx1, geks_fisher_idx2)
 ```
 
 ## Supported Index Methods
@@ -159,8 +159,8 @@ gk = pin.geary_khamis(df)
 
 ```python
 # Splicing methods
-movement_spliced = pin.movement_splice(df, base_indices)
-window_spliced = pin.window_splice(df, window_size=13)
+movement_spliced = pin.movement_splice(multilateral_index1, multilateral_index2)
+window_spliced = pin.window_splice(multilateral_index1, multilateral_index2)
 ```
 
 ## Documentation
@@ -201,7 +201,7 @@ If you use PyIndexNum in your research, please cite:
 ```bibtex
 @software{pyindexnum,
   title = {PyIndexNum: A Python Library for Economic Index Numbers},
-  author = {Luigi},
+  author = {Palumbo, Luigi, and Yu, Mengting},
   url = {https://github.com/paluigi/PyIndexNum},
   version = {0.1.0},
 }
@@ -214,7 +214,6 @@ PyIndexNum is licensed under the MIT License. See [LICENSE](LICENSE) for details
 ## Related Projects
 
 - [Polars](https://pola.rs/): The high-performance DataFrame library that powers PyIndexNum
-- [pandas](https://pandas.pydata.org/): Alternative DataFrame library
 - [NumPy](https://numpy.org/): Fundamental package for scientific computing
 
 ---

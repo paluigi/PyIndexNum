@@ -170,11 +170,11 @@ print(f"GEKS-Fisher Index (Jan-Mar): {geks_fisher_idx:.4f}")
 
 ## Step 6: Apply Extension Methods (Optional)
 
-For chained indices over longer time periods:
+For chained multilateral indices:
 
 ```python
 # Example of movement splicing for extending the index
-extended_indices = pin.movement_splice(df_agg, base_indices=[1.0, 1.0509, 1.1226])
+extended_indices = pin.movement_splice(geks_fisher_idx1, geks_fisher_idx2)
 print("Extended indices:", extended_indices)
 ```
 
@@ -186,6 +186,6 @@ This workflow demonstrates:
 2. **Data Quality**: Handling unbalanced panels through removal or imputation
 3. **Index Calculation**: Computing bilateral indices for period-to-period comparisons
 4. **Advanced Methods**: Using multilateral indices for multi-period analysis
-5. **Extensions**: Applying splicing methods for long-term index series
+5. **Extensions**: Applying splicing methods for chained multilateral indices
 
 The choice of specific methods depends on your data characteristics and analytical requirements. Always consider the economic interpretation of different index formulas when selecting appropriate methods for your use case.

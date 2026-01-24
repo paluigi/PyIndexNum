@@ -1,7 +1,7 @@
 # PyIndexNum
 
 [![PyPI version](https://badge.fury.io/py/pyindexnum.svg)](https://pypi.org/project/pyindexnum/)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation Status](https://readthedocs.org/projects/pyindexnum/badge/?version=latest)](https://pyindexnum.readthedocs.io/en/latest/?badge=latest)
 
@@ -203,7 +203,7 @@ If you use PyIndexNum in your research, please cite:
   title = {PyIndexNum: A Python Library for Economic Index Numbers},
   author = {Palumbo, Luigi, and Yu, Mengting},
   url = {https://github.com/paluigi/PyIndexNum},
-  version = {0.1.0},
+  version = {0.1.2},
 }
 ```
 
@@ -214,7 +214,6 @@ PyIndexNum is licensed under the MIT License. See [LICENSE](LICENSE) for details
 ## Related Projects
 
 - [Polars](https://pola.rs/): The high-performance DataFrame library that powers PyIndexNum
-- [NumPy](https://numpy.org/): Fundamental package for scientific computing
 
 ---
 

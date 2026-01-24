@@ -10,6 +10,13 @@ dependencies = [
     "scipy>=1.11.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/paluigi/PyIndexNum"
+Documentation = "https://pyindexnum.readthedocs.io/"
+Repository = "https://github.com/paluigi/PyIndexNum"
+Issues = "https://github.com/paluigi/PyIndexNum/issues"
+Changelog = "https://github.com/me/spam/blob/master/CHANGELOG.md"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

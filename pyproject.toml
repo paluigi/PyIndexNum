@@ -1,7 +1,7 @@
 [project]
 name = "pyindexnum"
 version = "0.1.1"
-description = "Add your description here"
+description = "Python library for index numbers calculations"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -14,7 +14,7 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=9.0.0",
 ]

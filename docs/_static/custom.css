@@ -1,10 +1,65 @@
-/* Custom CSS to fix nested field list indentation in API documentation */
+/* Custom CSS to completely flatten nested field lists */
 
-/* Reset left margins for nested field lists to prevent progressive indentation */
-.myst .field-list .field-list {
-    margin-left: 0;
+/* Remove all margins from nested definition lists */
+dl.field-list {
+    margin: 0 !important;
 }
 
-.myst .field-list .field-list dd {
-    margin-left: 0;
+/* Reset margins for all nested elements */
+.field-list dl,
+.field-list dt,
+.field-list dd {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+/* Make all nested field lists display as inline/block without nesting */
+.field-list .field-list {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* Ensure dt and dd elements don't accumulate indentation */
+.field-list > dt,
+.field-list > dd {
+    margin-left: 0 !important;
+}
+
+.field-list .field-list > dt,
+.field-list .field-list > dd,
+.field-list .field-list .field-list > dt,
+.field-list .field-list .field-list > dd {
+    margin-left: 0 !important;
+}
+
+/* Add small padding for visual separation */
+.field-list dt {
+    padding-top: 0.5em;
+    font-weight: bold;
+}
+
+.field-list dd {
+    padding-left: 0.5em;
+}
+
+/* Handle bullet list styling */
+.field-list ul {
+    margin: 0.5em 0 !important;
+    padding-left: 2em !important;
+    display: block !important;
+}
+
+.field-list ul li {
+    display: list-item !important;
+    margin-bottom: 0.5em !important;
+    margin-top: 0.25em !important;
+}
+
+/* Ensure bullet lists within descriptions have proper spacing */
+.field-list dd ul {
+    margin-top: 0.5em !important;
+    margin-bottom: 0.5em !important;
 }

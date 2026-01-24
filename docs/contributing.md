@@ -51,9 +51,6 @@ When submitting a pull request, please:
    ```bash
    # Run all tests
    uv run pytest
-
-   # Run with coverage
-   uv run pytest --cov=pyindexnum --cov-report=html
    ```
 
 4. **Update documentation** if adding new features

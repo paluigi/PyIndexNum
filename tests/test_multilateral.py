@@ -59,15 +59,13 @@ class TestGEKSIndices:
         # Check base period is 1.0
         assert result.filter(pl.col("period") == date(2023, 1, 1)).select("index_value").item() == pytest.approx(1.0)
 
-        # With constant quantities, expenditure shares change only due to prices.
-        # Manual check for P2/P1:
-        # P1 shares: A=1000/5250 ≈ 0.190476, B=4000/5250 ≈ 0.761905, C=250/5250 ≈ 0.047619
-        # P2 shares: A=1050/5510 ≈ 0.190563, B=4200/5510 ≈ 0.762250, C=260/5510 ≈ 0.047187
-        # Relatives: 1.05, 1.05, 1.04
-        # Weight A: 0.190520, Weight B: 0.762078, Weight C: 0.047403
-        # exp(0.190520*ln(1.05) + 0.762078*ln(1.05) + 0.047403*ln(1.04))
-        # ≈ exp(0.0093 + 0.0371 + 0.0018) ≈ exp(0.0482) ≈ 1.04937
-        assert result.filter(pl.col("period") == date(2023, 2, 1)).select("index_value").item() == pytest.approx(1.04937, abs=1e-4)
+        # With constant quantities, GEKS-Tornqvist reduces to the bilateral Tornqvist.
+        # GEKS(2) = [T(1,2)/T(1,1) * T(2,2)/T(2,1) * T(3,2)/T(3,1)]^(1/3)
+        # = [T12 * T12 * T13/T23]^(1/3)
+        # T12 = 1.0495238, T13 = 1.0990476, T23 = 1.0471869
+        # GEKS(2) ≈ 1.0495238
+        expected_2 = 1.0495238009
+        assert result.filter(pl.col("period") == date(2023, 2, 1)).select("index_value").item() == pytest.approx(expected_2, abs=1e-6)
 
     def test_geks_insufficient_periods(self):
         """Test GEKS with insufficient periods."""

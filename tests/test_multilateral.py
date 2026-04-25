@@ -38,8 +38,14 @@ class TestGEKSIndices:
         # Check base period is 1.0
         assert result.filter(pl.col("period") == date(2023, 1, 1)).select("index_value").item() == pytest.approx(1.0)
 
-        # Check all indices are positive
-        assert result.filter(pl.col("index_value") <= 0).height == 0
+        # For GEKS-Fisher with constant quantities across all periods, 
+        # the multilateral index should be transitive and match bilateral Fisher.
+        # Since quantities are constant (10, 20, 5), Fisher matches Laspeyres/Paasche.
+        # Relative price change from period 1 to 2 for A, B, C: 1.05, 1.05, 1.04
+        # Fisher(1,2) = (105*10 + 210*20 + 52*5) / (100*10 + 200*20 + 50*5)
+        # = (1050 + 4200 + 260) / (1000 + 4000 + 250) = 5510 / 5250 ≈ 1.0495238
+        expected_2 = 5510 / 5250
+        assert result.filter(pl.col("period") == date(2023, 2, 1)).select("index_value").item() == pytest.approx(expected_2, abs=1e-6)
 
     def test_geks_tornqvist_basic(self, sample_data):
         """Test basic GEKS-Törnqvist functionality."""
@@ -53,8 +59,15 @@ class TestGEKSIndices:
         # Check base period is 1.0
         assert result.filter(pl.col("period") == date(2023, 1, 1)).select("index_value").item() == pytest.approx(1.0)
 
-        # Check all indices are positive
-        assert result.filter(pl.col("index_value") <= 0).height == 0
+        # With constant quantities, expenditure shares change only due to prices.
+        # Manual check for P2/P1:
+        # P1 shares: A=1000/5250 ≈ 0.190476, B=4000/5250 ≈ 0.761905, C=250/5250 ≈ 0.047619
+        # P2 shares: A=1050/5510 ≈ 0.190563, B=4200/5510 ≈ 0.762250, C=260/5510 ≈ 0.047187
+        # Relatives: 1.05, 1.05, 1.04
+        # Weight A: 0.190520, Weight B: 0.762078, Weight C: 0.047403
+        # exp(0.190520*ln(1.05) + 0.762078*ln(1.05) + 0.047403*ln(1.04))
+        # ≈ exp(0.0093 + 0.0371 + 0.0018) ≈ exp(0.0482) ≈ 1.04937
+        assert result.filter(pl.col("period") == date(2023, 2, 1)).select("index_value").item() == pytest.approx(1.04937, abs=1e-4)
 
     def test_geks_insufficient_periods(self):
         """Test GEKS with insufficient periods."""
@@ -109,8 +122,9 @@ class TestGearyKhamis:
         # Check base period is 1.0
         assert result.filter(pl.col("period") == date(2023, 1, 1)).select("index_value").item() == pytest.approx(1.0, abs=1e-6)
 
-        # Check all indices are positive
-        assert result.filter(pl.col("index_value") <= 0).height == 0
+        # With constant quantities, price levels should follow the average price change
+        # Period 2 vs Period 1: (105*10 + 210*20) / (100*10 + 200*20) = 5250 / 5000 = 1.05
+        assert result.filter(pl.col("period") == date(2023, 2, 1)).select("index_value").item() == pytest.approx(1.05, abs=1e-6)
 
     def test_geary_khamis_convergence(self, sample_data):
         """Test Geary-Khamis convergence."""

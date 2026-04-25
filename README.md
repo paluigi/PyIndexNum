@@ -78,13 +78,13 @@ extended_idx = pin.movement_splice(geks_fisher_idx1, geks_fisher_idx2)
 | Index | Formula | Use Case |
 |-------|---------|----------|
 | **Jevons** | Geometric mean of price relatives | Unweighted geometric average |
-| **Dudot** | Arithmetic mean of price relatives | Unweighted arithmetic average |
-| **Carli** | Ratio of arithmetic means | Simple price average comparison |
+| **Carli** | Arithmetic mean of price relatives | Unweighted arithmetic average |
+| **Dutot** | Ratio of arithmetic means of prices | Simple price average comparison |
 | **Laspeyres** | Weighted by base period quantities | Fixed basket approach |
 | **Paasche** | Weighted by current period quantities | Current basket approach |
 | **Fisher** | Geometric mean of Laspeyres and Paasche | Ideal index (time/quantity reversal) |
-| **Törnqvist** | Weighted geometric mean with average shares | Symmetric treatment |
-| **Walsh** | Geometric mean with base quantity weights | Alternative symmetric approach |
+| **Törnqvist** | Weighted geometric mean with average expenditure shares | Symmetric treatment |
+| **Walsh** | Geometric mean of quantities as fixed basket | Alternative symmetric approach |
 
 ### Multilateral Indices (Multi-Period Comparisons)
 

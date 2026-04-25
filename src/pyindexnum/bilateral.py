@@ -73,11 +73,11 @@ def jevons(df: pl.DataFrame) -> float:
     return index
 
 
-def dudot(df: pl.DataFrame) -> float:
+def carli(df: pl.DataFrame) -> float:
     """
-    Compute the Dudot price index (arithmetic mean of price relatives).
+    Compute the Carli price index (arithmetic mean of price relatives).
 
-    The Dudot index is calculated as the arithmetic mean of the price relatives
+    The Carli index is calculated as the arithmetic mean of the price relatives
     (current price / base price) for each product.
 
     Args:
@@ -86,7 +86,7 @@ def dudot(df: pl.DataFrame) -> float:
             exactly one price per period.
 
     Returns:
-        The Dudot price index as a float.
+        The Carli price index as a float.
 
     Raises:
         ValueError: If DataFrame doesn't have exactly two unique dates,
@@ -101,12 +101,11 @@ def dudot(df: pl.DataFrame) -> float:
         ...     "product_id": ["A", "B", "A", "B"],
         ...     "price": [100, 200, 110, 190]
         ... })
-        >>> dudot(df)  # doctest: +ELLIPSIS
+        >>> carli(df)  # doctest: +ELLIPSIS
         0.95...
     """
     _validate_bilateral_input(df)
 
-    # Split into base and current periods
     dates = df.select("date").unique().sort("date")
     base_date = dates[0, "date"]
     current_date = dates[1, "date"]
@@ -114,26 +113,24 @@ def dudot(df: pl.DataFrame) -> float:
     df_base = df.filter(pl.col("date") == base_date)
     df_current = df.filter(pl.col("date") == current_date)
 
-    # Join and compute relatives
     joined = df_base.join(df_current, on="product_id", suffix="_current")
     relatives = joined.with_columns(
         (pl.col("price_current") / pl.col("price")).alias("relative")
     )
 
-    # Arithmetic mean of relatives
     index = relatives.select(pl.col("relative").mean()).item()
 
     if index is None or index <= 0:
-        raise ValueError("Cannot compute Dudot index with negative or null price relatives")
+        raise ValueError("Cannot compute Carli index with negative or null price relatives")
 
     return index
 
 
-def carli(df: pl.DataFrame) -> float:
+def dutot(df: pl.DataFrame) -> float:
     """
-    Compute the Carli price index (ratio of arithmetic means).
+    Compute the Dutot price index (ratio of arithmetic means).
 
-    The Carli index is calculated as the ratio of the arithmetic mean of prices
+    The Dutot index is calculated as the ratio of the arithmetic mean of prices
     in the current period to the arithmetic mean of prices in the base period.
 
     Args:
@@ -142,7 +139,7 @@ def carli(df: pl.DataFrame) -> float:
             exactly one price per period.
 
     Returns:
-        The Carli price index as a float.
+        The Dutot price index as a float.
 
     Raises:
         ValueError: If DataFrame doesn't have exactly two unique dates,
@@ -157,12 +154,11 @@ def carli(df: pl.DataFrame) -> float:
         ...     "product_id": ["A", "B", "A", "B"],
         ...     "price": [100, 200, 110, 190]
         ... })
-        >>> carli(df)  # doctest: +ELLIPSIS
+        >>> dutot(df)  # doctest: +ELLIPSIS
         0.95...
     """
     _validate_bilateral_input(df)
 
-    # Split into base and current periods
     dates = df.select("date").unique().sort("date")
     base_date = dates[0, "date"]
     current_date = dates[1, "date"]
@@ -170,12 +166,11 @@ def carli(df: pl.DataFrame) -> float:
     df_base = df.filter(pl.col("date") == base_date)
     df_current = df.filter(pl.col("date") == current_date)
 
-    # Compute arithmetic means
     mean_base = df_base.select(pl.col("price").mean()).item()
     mean_current = df_current.select(pl.col("price").mean()).item()
 
     if mean_base is None or mean_current is None or mean_base <= 0:
-        raise ValueError("Cannot compute Carli index with negative, zero, or null prices")
+        raise ValueError("Cannot compute Dutot index with negative, zero, or null prices")
 
     return mean_current / mean_base
 
@@ -352,11 +347,11 @@ def tornqvist(df: pl.DataFrame) -> float:
     """
     Compute the Törnqvist price index.
 
-    The Törnqvist index is calculated using the geometric mean of price relatives
-    weighted by the average quantity shares in the two periods.
+    The Törnqvist index is a weighted geometric average of the price relatives.
+    The weights are the arithmetic average of the expenditure shares in the two periods.
 
-    Formula: exp(sum((q_0 + q_t)/(2 * Q) * ln(p_t / p_0)))
-    where Q = sum(q_0 + q_t)
+    Formula: exp(sum(0.5 * (s_0 + s_t) * ln(p_t / p_0)))
+    where s_i = (p_i * q_i) / sum(p_i * q_i)
 
     Args:
         df: Polars DataFrame with standardized columns ("date", "price", "product_id", "quantity")
@@ -393,19 +388,24 @@ def tornqvist(df: pl.DataFrame) -> float:
     df_base = df.filter(pl.col("date") == base_date)
     df_current = df.filter(pl.col("date") == current_date)
 
+    # Calculate expenditure shares for each period
+    total_exp_base = df_base.select((pl.col("price") * pl.col("quantity")).sum()).item()
+    total_exp_current = df_current.select((pl.col("price") * pl.col("quantity")).sum()).item()
+
+    df_base = df_base.with_columns(
+        ((pl.col("price") * pl.col("quantity")) / total_exp_base).alias("share")
+    )
+    df_current = df_current.with_columns(
+        ((pl.col("price") * pl.col("quantity")) / total_exp_current).alias("share")
+    )
+
     # Join on product_id
     joined = df_base.join(df_current, on="product_id", suffix="_current")
 
-    # Compute total quantity Q = sum(q_0 + q_t)
-    total_quantity = joined.select((pl.col("quantity") + pl.col("quantity_current")).sum()).item()
-
-    if total_quantity is None or total_quantity <= 0:
-        raise ValueError("Cannot compute Törnqvist index with zero or negative total quantities")
-
-    # Compute weighted log relatives: (q_0 + q_t)/(2 * Q) * ln(p_t / p_0)
+    # Compute weighted log relatives: 0.5 * (s_0 + s_t) * ln(p_t / p_0)
     weighted_logs = joined.with_columns(
         (
-            (pl.col("quantity") + pl.col("quantity_current")) / (2 * total_quantity) *
+            0.5 * (pl.col("share") + pl.col("share_current")) *
             (pl.col("price_current") / pl.col("price")).log()
         ).alias("weighted_log")
     )
@@ -423,11 +423,10 @@ def walsh(df: pl.DataFrame) -> float:
     """
     Compute the Walsh price index.
 
-    The Walsh index is calculated as a weighted geometric mean using base period
-    quantities as weights, where the price relative for each product is the
-    geometric mean of the prices in the two periods.
+    The Walsh index is a pure price index that uses the geometric mean of the
+    quantities from the two periods as the fixed basket.
 
-    Formula: sum(sqrt(p_t * p_0) * q_0) / sum(p_0 * q_0)
+    Formula: sum(p_t * sqrt(q_0 * q_t)) / sum(p_0 * sqrt(q_0 * q_t))
 
     Args:
         df: Polars DataFrame with standardized columns ("date", "price", "product_id", "quantity")
@@ -467,13 +466,20 @@ def walsh(df: pl.DataFrame) -> float:
     # Join on product_id
     joined = df_base.join(df_current, on="product_id", suffix="_current")
 
-    # Compute numerator: sum(sqrt(p_t * p_0) * q_0)
+    # Compute fixed basket: sqrt(q_0 * q_t)
+    joined = joined.with_columns(
+        (pl.col("quantity") * pl.col("quantity_current")).sqrt().alias("basket")
+    )
+
+    # Compute numerator: sum(p_t * basket)
     numerator = joined.select(
-        ((pl.col("price_current") * pl.col("price")).sqrt() * pl.col("quantity")).sum()
+        (pl.col("price_current") * pl.col("basket")).sum()
     ).item()
 
-    # Compute denominator: sum(p_0 * q_0)
-    denominator = joined.select((pl.col("price") * pl.col("quantity")).sum()).item()
+    # Compute denominator: sum(p_0 * basket)
+    denominator = joined.select(
+        (pl.col("price") * pl.col("basket")).sum()
+    ).item()
 
     if denominator is None or denominator <= 0:
         raise ValueError("Cannot compute Walsh index with zero or negative base period expenditures")

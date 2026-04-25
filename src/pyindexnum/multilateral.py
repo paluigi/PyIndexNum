@@ -17,8 +17,10 @@ def geks_fisher(df: pl.DataFrame) -> pl.DataFrame:
     Compute the GEKS-Fisher multilateral price index.
 
     The GEKS (Generalized EKS) method uses bilateral Fisher indices between
-    all pairs of periods, then takes the geometric mean for each period.
-    This produces transitive multilateral indices.
+    all pairs of periods. The price level for period t relative to period 1
+    is the geometric mean of all possible bilateral links.
+
+    Formula: P_geks_t = product_{k=1}^T [P_F(p^k, p^t, q^k, q^t) / P_F(p^k, p^1, q^k, q^1)]^(1/T)
 
     Args:
         df: Polars DataFrame with standardized columns ("product_id", "period",
@@ -45,75 +47,17 @@ def geks_fisher(df: pl.DataFrame) -> pl.DataFrame:
         >>> result = geks_fisher(df)
         >>> # Returns DataFrame with period and index_value columns
     """
-    _validate_multilateral_input(df)
-
-    periods = df.select("period").unique().sort("period").to_series().to_list()
-
-    if len(periods) < 2:
-        raise ValueError("GEKS requires at least 2 periods")
-
-    # Compute bilateral Fisher indices for all pairs
-    bilateral_indices = {}
-    for i, period_i in enumerate(periods):
-        for j, period_j in enumerate(periods):
-            if i < j:  # Only compute each pair once
-                df_i = df.filter(pl.col("period") == period_i)
-                df_j = df.filter(pl.col("period") == period_j)
-
-                # Create bilateral dataframe
-                bilateral_df = pl.concat([
-                    df_i.select(["product_id", "aggregated_price", "aggregated_quantity"])
-                        .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
-                        .with_columns(pl.lit(period_i).alias("date")),
-                    df_j.select(["product_id", "aggregated_price", "aggregated_quantity"])
-                        .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
-                        .with_columns(pl.lit(period_j).alias("date"))
-                ])
-
-                try:
-                    idx = fisher(bilateral_df)
-                    bilateral_indices[(i, j)] = idx
-                    bilateral_indices[(j, i)] = 1.0 / idx  # Store inverse for efficiency
-                except ValueError:
-                    # If Fisher fails, skip this pair
-                    continue
-
-    # Compute GEKS indices
-    indices = []
-    for i, period in enumerate(periods):
-        # Get all bilateral indices involving this period
-        period_indices = []
-        for j, other_period in enumerate(periods):
-            if i != j:
-                if (min(i, j), max(i, j)) in bilateral_indices:
-                    # Get the index where this period is the base
-                    if i < j:
-                        period_indices.append(bilateral_indices[(i, j)])
-                    else:
-                        period_indices.append(bilateral_indices[(j, i)])
-
-        if period_indices:
-            # Geometric mean of bilateral indices
-            geks_index = np.exp(np.mean(np.log(period_indices)))
-            indices.append({"period": period, "index_value": geks_index})
-        else:
-            indices.append({"period": period, "index_value": 1.0})
-
-    # Set base period (first period) to 1.0 and adjust others
-    base_index = indices[0]["index_value"]
-    for idx in indices:
-        idx["index_value"] = idx["index_value"] / base_index
-
-    return pl.DataFrame(indices)
+    return _geks_base(df, fisher)
 
 
 def geks_tornqvist(df: pl.DataFrame) -> pl.DataFrame:
     """
-    Compute the GEKS-Törnqvist multilateral price index.
+    Compute the GEKS-Törnqvist (CCDI) multilateral price index.
 
-    The GEKS (Generalized EKS) method uses bilateral Törnqvist indices between
-    all pairs of periods, then takes the geometric mean for each period.
-    This produces transitive multilateral indices.
+    The GEKS method applied using the Törnqvist index as the underlying
+    bilateral formula.
+
+    Formula: P_ccdi_t = product_{k=1}^T [P_T(p^k, p^t, s^k, s^t) / P_T(p^k, p^1, s^k, s^1)]^(1/T)
 
     Args:
         df: Polars DataFrame with standardized columns ("product_id", "period",
@@ -140,64 +84,82 @@ def geks_tornqvist(df: pl.DataFrame) -> pl.DataFrame:
         >>> result = geks_tornqvist(df)
         >>> # Returns DataFrame with period and index_value columns
     """
+    return _geks_base(df, tornqvist)
+
+
+def _geks_base(df: pl.DataFrame, bilateral_func) -> pl.DataFrame:
+    """Helper for GEKS indices computation."""
     _validate_multilateral_input(df)
 
     periods = df.select("period").unique().sort("period").to_series().to_list()
+    T = len(periods)
 
-    if len(periods) < 2:
+    if T < 2:
         raise ValueError("GEKS requires at least 2 periods")
 
-    # Compute bilateral Törnqvist indices for all pairs
-    bilateral_indices = {}
+    # Pre-calculate all bilateral indices P(k, t)
+    # Store in a matrix-like dictionary for easy access
+    bilateral_matrix = {}
     for i, period_i in enumerate(periods):
         for j, period_j in enumerate(periods):
-            if i < j:  # Only compute each pair once
-                df_i = df.filter(pl.col("period") == period_i)
-                df_j = df.filter(pl.col("period") == period_j)
+            if i == j:
+                bilateral_matrix[(i, j)] = 1.0
+                continue
+            
+            # Filter data for the two periods
+            df_i = df.filter(pl.col("period") == period_i)
+            df_j = df.filter(pl.col("period") == period_j)
 
-                # Create bilateral dataframe
-                bilateral_df = pl.concat([
-                    df_i.select(["product_id", "aggregated_price", "aggregated_quantity"])
-                        .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
-                        .with_columns(pl.lit(period_i).alias("date")),
-                    df_j.select(["product_id", "aggregated_price", "aggregated_quantity"])
-                        .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
-                        .with_columns(pl.lit(period_j).alias("date"))
-                ])
+            # Important: Ensure periods are in chronological order for the bilateral function
+            # The bilateral functions expect first date as base, second as current.
+            if i < j:
+                base_p, curr_p = period_i, period_j
+                base_df, curr_df = df_i, df_j
+            else:
+                base_p, curr_p = period_j, period_i
+                base_df, curr_df = df_j, df_i
 
-                try:
-                    idx = tornqvist(bilateral_df)
-                    bilateral_indices[(i, j)] = idx
-                    bilateral_indices[(j, i)] = 1.0 / idx  # Store inverse for efficiency
-                except ValueError:
-                    # If Törnqvist fails, skip this pair
-                    continue
+            # Create bilateral dataframe format expected by bilateral functions
+            bilateral_df = pl.concat([
+                base_df.select(["product_id", "aggregated_price", "aggregated_quantity"])
+                    .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
+                    .with_columns(pl.lit(base_p).alias("date")),
+                curr_df.select(["product_id", "aggregated_price", "aggregated_quantity"])
+                    .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
+                    .with_columns(pl.lit(curr_p).alias("date"))
+            ])
 
-    # Compute GEKS indices
+            try:
+                # Calculate bilateral index
+                idx = bilateral_func(bilateral_df)
+                
+                # If i > j, we need the inverse because bilateral_func(bilateral_df) 
+                # calculated P(j, i) but we want P(i, j)
+                if i < j:
+                    bilateral_matrix[(i, j)] = idx
+                else:
+                    bilateral_matrix[(i, j)] = 1.0 / idx
+            except ValueError:
+                # In GEKS, we should ideally have a complete graph, 
+                # but if data is missing, this is a simplified version.
+                # Here we assume full overlap for simplicity as per requirements.
+                raise
+
+    # Compute GEKS: P_geks_t = product_{k=0}^{T-1} [P(k, t) / P(k, 0)]^(1/T)
+    # This is equivalent to linking period t to period 0 via all intermediate periods k
     indices = []
-    for i, period in enumerate(periods):
-        # Get all bilateral indices involving this period
-        period_indices = []
-        for j, other_period in enumerate(periods):
-            if i != j:
-                if (min(i, j), max(i, j)) in bilateral_indices:
-                    # Get the index where this period is the base
-                    if i < j:
-                        period_indices.append(bilateral_indices[(i, j)])
-                    else:
-                        period_indices.append(bilateral_indices[(j, i)])
-
-        if period_indices:
-            # Geometric mean of bilateral indices
-            geks_index = np.exp(np.mean(np.log(period_indices)))
-            indices.append({"period": period, "index_value": geks_index})
-        else:
-            indices.append({"period": period, "index_value": 1.0})
-
-    # Set base period (first period) to 1.0 and adjust others
-    base_index = indices[0]["index_value"]
-    for idx in indices:
-        idx["index_value"] = idx["index_value"] / base_index
+    for t in range(T):
+        log_sum = 0.0
+        for k in range(T):
+            # log(P(k, t) / P(k, 0))
+            # Note: bilateral_matrix stores P(i, j) = Price in j relative to i
+            # So P(k, t) is price in t relative to k
+            # P(k, 0) is price in 0 relative to k
+            # P(k, t) / P(k, 0) is the link from 0 to t via k
+            log_sum += np.log(bilateral_matrix[(k, t)] / bilateral_matrix[(k, 0)])
+        
+        geks_t = np.exp(log_sum / T)
+        indices.append({"period": periods[t], "index_value": geks_t})
 
     return pl.DataFrame(indices)
 
@@ -207,8 +169,7 @@ def geary_khamis(df: pl.DataFrame, max_iter: int = 100, tol: float = 1e-8) -> pl
     Compute the Geary-Khamis multilateral price index.
 
     The Geary-Khamis method is an iterative multilateral index that solves
-    for price levels and quantity weights simultaneously. It produces
-    transitive indices that satisfy circularity tests.
+    for reference prices and period price levels simultaneously.
 
     Args:
         df: Polars DataFrame with standardized columns ("product_id", "period",
@@ -225,102 +186,56 @@ def geary_khamis(df: pl.DataFrame, max_iter: int = 100, tol: float = 1e-8) -> pl
 
     Raises:
         ValueError: If DataFrame doesn't meet requirements or iteration doesn't converge.
-
-    Examples:
-        >>> import polars as pl
-        >>> df = pl.DataFrame({
-        ...     "product_id": ["A", "A", "B", "B"],
-        ...     "period": [pl.date(2023, 1, 1), pl.date(2023, 2, 1), pl.date(2023, 1, 1), pl.date(2023, 2, 1)],
-        ...     "aggregated_price": [100, 110, 200, 210],
-        ...     "aggregated_quantity": [10, 10, 20, 20]
-        ... })
-        >>> result = geary_khamis(df)
-        >>> # Returns DataFrame with period and index_value columns
     """
     _validate_multilateral_input(df)
 
     periods = df.select("period").unique().sort("period").to_series().to_list()
     products = df.select("product_id").unique().to_series().to_list()
+    T = len(periods)
+    N = len(products)
 
-    if len(periods) < 2 or len(products) < 2:
-        raise ValueError("Geary-Khamis requires at least 2 periods and 2 products")
+    # Convert to matrix for faster iterative computation
+    # Rows: periods, Cols: products
+    pivot_price = df.pivot(index="period", on="product_id", values="aggregated_price").sort("period")
+    pivot_qty = df.pivot(index="period", on="product_id", values="aggregated_quantity").sort("period")
+    
+    # Fill nulls if any (though validation should catch this)
+    P = pivot_price.select(products).to_numpy()
+    Q = pivot_qty.select(products).to_numpy()
 
-    # Initialize price levels (all start at 1.0)
-    price_levels = {period: 1.0 for period in periods}
+    # Initialize price levels P_GK^t = 1 for all t
+    price_levels = np.ones(T)
 
-    # Initialize quantity weights (arithmetic mean of quantities across periods)
-    quantity_weights = {}
-    for product in products:
-        product_data = df.filter(pl.col("product_id") == product)
-        avg_quantity = product_data.select(pl.col("aggregated_quantity").mean()).item()
-        quantity_weights[product] = avg_quantity
-
-    # Iterative solution
     for iteration in range(max_iter):
-        # Update price levels
-        new_price_levels = {}
-        for period in periods:
-            period_data = df.filter(pl.col("period") == period)
+        prev_price_levels = price_levels.copy()
 
-            numerator = 0.0
-            denominator = 0.0
+        # 1. Calculate Reference Prices (alpha_n)
+        # alpha_n = [sum_t (q_n^t * p_n^t / P_GK^t)] / [sum_t q_n^t]
+        numerator_alpha = np.sum((Q * P) / price_levels[:, np.newaxis], axis=0)
+        denominator_alpha = np.sum(Q, axis=0)
+        alpha = numerator_alpha / denominator_alpha
 
-            for product in products:
-                product_row = period_data.filter(pl.col("product_id") == product)
-                if product_row.height > 0:
-                    price = product_row.select("aggregated_price").item()
-                    quantity = quantity_weights[product]
-                    numerator += price * quantity
-                    denominator += quantity
+        # 2. Update Period Price Levels (P_GK^t)
+        # P_GK^t = [sum_n p_n^t * q_n^t] / [sum_n alpha_n * q_n^t]
+        numerator_P = np.sum(P * Q, axis=1)
+        denominator_P = np.sum(alpha * Q, axis=1)
+        price_levels = numerator_P / denominator_P
 
-            if denominator > 0:
-                new_price_levels[period] = numerator / denominator
-            else:
-                new_price_levels[period] = 1.0
-
-        # Update quantity weights
-        new_quantity_weights = {}
-        for product in products:
-            product_data = df.filter(pl.col("product_id") == product)
-
-            numerator = 0.0
-            denominator = 0.0
-
-            for period in periods:
-                period_row = product_data.filter(pl.col("period") == period)
-                if period_row.height > 0:
-                    price = period_row.select("aggregated_price").item()
-                    price_level = new_price_levels[period]
-                    numerator += price / price_level
-                    denominator += 1.0
-
-            if denominator > 0:
-                new_quantity_weights[product] = numerator / denominator
-            else:
-                new_quantity_weights[product] = quantity_weights[product]
+        # Normalize price_levels to make the system stable (e.g., first period = 1)
+        # This doesn't change the relatives but helps convergence
+        price_levels /= price_levels[0]
 
         # Check convergence
-        max_diff_levels = max(abs(price_levels[p] - new_price_levels[p]) for p in periods)
-        max_diff_weights = max(abs(quantity_weights[p] - new_quantity_weights[p]) for p in products)
-
-        price_levels = new_price_levels
-        quantity_weights = new_quantity_weights
-
-        if max_diff_levels < tol and max_diff_weights < tol:
+        if np.max(np.abs(price_levels - prev_price_levels)) < tol:
             break
-
-    if iteration == max_iter - 1:
+    else:
         raise ValueError(f"Geary-Khamis did not converge within {max_iter} iterations")
 
-    # Create result DataFrame, normalize to base period
-    base_period = periods[0]
-    base_level = price_levels[base_period]
-
     indices = []
-    for period in periods:
+    for t in range(T):
         indices.append({
-            "period": period,
-            "index_value": price_levels[period] / base_level
+            "period": periods[t],
+            "index_value": price_levels[t]
         })
 
     return pl.DataFrame(indices)

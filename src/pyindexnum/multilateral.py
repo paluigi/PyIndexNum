@@ -200,8 +200,9 @@ def geary_khamis(df: pl.DataFrame, max_iter: int = 100, tol: float = 1e-8) -> pl
     pivot_qty = df.pivot(index="period", on="product_id", values="aggregated_quantity").sort("period")
     
     # Fill nulls if any (though validation should catch this)
-    P = pivot_price.select(products).to_numpy()
-    Q = pivot_qty.select(products).to_numpy()
+    product_cols = [str(p) for p in products]
+    P = pivot_price.select(product_cols).to_numpy()
+    Q = pivot_qty.select(product_cols).to_numpy()
 
     # Initialize price levels P_GK^t = 1 for all t
     price_levels = np.ones(T)
@@ -254,9 +255,10 @@ def time_product_dummy(df: pl.DataFrame, weighted: bool = True) -> pl.DataFrame:
             "aggregated_price") and optionally "aggregated_quantity" if weighted=True.
             Contains data for multiple periods, with each product having exactly
             one price per period.
-        weighted: If True, use weighted least squares with aggregated_quantity as weights.
-                 If False, use unweighted OLS. If no quantity column, automatically
-                 uses unweighted regardless of this parameter.
+        weighted: If True, use weighted least squares with expenditure shares
+                 (p*q / sum(p*q) per period) as weights. If False, use unweighted OLS.
+                 If no quantity column, automatically uses unweighted regardless of
+                 this parameter.
 
     Returns:
         DataFrame with columns "period" (Date) and "index_value" (float),
@@ -323,21 +325,31 @@ def time_product_dummy(df: pl.DataFrame, weighted: bool = True) -> pl.DataFrame:
     # Dependent variable: log of prices
     y = np.log(df.select("aggregated_price").to_series().to_numpy())
 
-    # Weights for WLS (if weighted and quantities available)
+    # Weights for WLS: expenditure shares per period (p*q / sum(p*q) within each period)
     weights = None
     if weighted and "aggregated_quantity" in df.columns:
-        weights = df.select("aggregated_quantity").to_series().to_numpy()
-        # Normalize weights
-        weights = weights / np.sum(weights) * len(weights)
+        prices_arr = df.select("aggregated_price").to_series().to_numpy()
+        quantities_arr = df.select("aggregated_quantity").to_series().to_numpy()
+        expenditure = prices_arr * quantities_arr
+        periods_arr = df.select("period").to_series()
 
-    # Perform regression
+        weights = np.empty(n_obs)
+        unique_periods = periods_arr.unique(maintain_order=True).to_list()
+        for p in unique_periods:
+            mask = (periods_arr == p)
+            period_total = expenditure[mask.to_numpy()].sum()
+            weights[mask.to_numpy()] = expenditure[mask.to_numpy()] / period_total
+
+    # Perform regression using sqrt-weights trick to avoid dense N×N diagonal matrix.
+    # Use QR decomposition via np.linalg.lstsq for numerical stability with
+    # large, potentially ill-conditioned design matrices.
     if weighted and weights is not None:
-        # Weighted least squares
-        W = np.diag(weights)
-        beta = np.linalg.inv(X.T @ W @ X) @ X.T @ W @ y
+        sqrt_w = np.sqrt(weights)
+        Xw = X * sqrt_w[:, np.newaxis]
+        yw = y * sqrt_w
+        beta, _, _, _ = np.linalg.lstsq(Xw, yw, rcond=None)
     else:
-        # Ordinary least squares
-        beta = np.linalg.inv(X.T @ X) @ X.T @ y
+        beta, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
 
     # Extract time dummy coefficients
     # beta[0] is intercept (base period)

@@ -169,7 +169,34 @@ class TestTimeProductDummy:
         assert result.filter(pl.col("period") == date(2023, 1, 1)).select("index_value").item() == pytest.approx(1.0)
         assert result.filter(pl.col("index_value") <= 0).height == 0
 
+    def test_time_product_dummy_weighted_expenditure_shares(self):
+        """Test that weighted TPD uses expenditure shares, not raw quantities."""
+        df = pl.DataFrame({
+            "product_id": ["A", "A", "B", "B"],
+            "period": [date(2023, 1, 1), date(2023, 2, 1),
+                       date(2023, 1, 1), date(2023, 2, 1)],
+            "aggregated_price": [10.0, 12.0, 100.0, 105.0],
+            "aggregated_quantity": [100, 100, 1, 1],
+        })
+        result_weighted = time_product_dummy(df, weighted=True)
+        result_unweighted = time_product_dummy(df, weighted=False)
 
+        assert result_weighted.height == 2
+        assert result_unweighted.height == 2
+
+        py_w = result_weighted.filter(pl.col("period") == date(2023, 2, 1)).select("index_value").item()
+        py_u = result_unweighted.filter(pl.col("period") == date(2023, 2, 1)).select("index_value").item()
+        assert py_w != pytest.approx(py_u, abs=1e-3)
+
+    def test_time_product_dummy_unweighted_ignores_quantity(self, sample_data):
+        """Test that unweighted TPD gives same results with or without quantity column."""
+        result_with_qty = time_product_dummy(sample_data, weighted=False)
+        sample_data_no_q = sample_data.drop("aggregated_quantity")
+        result_no_qty = time_product_dummy(sample_data_no_q, weighted=False)
+
+        vals_with = result_with_qty.sort("period").select("index_value").to_series().to_list()
+        vals_no = result_no_qty.sort("period").select("index_value").to_series().to_list()
+        assert vals_with == pytest.approx(vals_no, abs=1e-10)
 
     def test_time_product_dummy_no_quantity_weighted(self, sample_data_no_quantity):
         """Test that weighted TPD fails without quantity column."""

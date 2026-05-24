@@ -9,7 +9,7 @@ import polars as pl
 import numpy as np
 from scipy.optimize import root_scalar
 from typing import Optional
-from .bilateral import fisher, tornqvist
+from .bilateral import fisher, tornqvist, jevons
 
 
 def geks_fisher(df: pl.DataFrame) -> pl.DataFrame:
@@ -85,6 +85,53 @@ def geks_tornqvist(df: pl.DataFrame) -> pl.DataFrame:
         >>> # Returns DataFrame with period and index_value columns
     """
     return _geks_base(df, tornqvist)
+
+
+def geks_jevons(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Compute the GEKS-Jevons multilateral price index.
+
+    The GEKS method applied using the Jevons (unweighted geometric mean of
+    price relatives) index as the underlying bilateral formula. Since the
+    Jevons index is unweighted, this method only requires price information
+    (though the quantity column must still be present for API consistency).
+
+    Formula: P_geks-J(0,t) = product_{k=0}^{T-1} [P_J(k,t) / P_J(k,0)]^(1/T)
+
+    where P_J(a,b) is the Jevons bilateral index between periods a and b:
+    P_J(a,b) = [prod_{i=1}^{N} (p_i^b / p_i^a)]^(1/N)
+
+    GEKS-Jevons is particularly useful for web-scraped data where quantity
+    information is unavailable. Despite being unweighted, it has been found
+    to outperform some weighted bilateral methods in empirical studies.
+
+    Args:
+        df: Polars DataFrame with standardized columns ("product_id", "period",
+            "aggregated_price", "aggregated_quantity") containing data for
+            multiple periods, with each product having exactly one price
+            and quantity per period. Note: aggregated_quantity is required
+            for input validation consistency but is not used in the computation.
+
+    Returns:
+        DataFrame with columns "period" (Date) and "index_value" (float),
+        where index_value represents the multilateral price index for each period
+        relative to the base period (first chronological period = 1.0).
+
+    Raises:
+        ValueError: If DataFrame doesn't meet requirements (see _validate_multilateral_input).
+
+    Examples:
+        >>> import polars as pl
+        >>> df = pl.DataFrame({
+        ...     "product_id": ["A", "A", "B", "B"],
+        ...     "period": [pl.date(2023, 1, 1), pl.date(2023, 2, 1), pl.date(2023, 1, 1), pl.date(2023, 2, 1)],
+        ...     "aggregated_price": [100, 110, 200, 210],
+        ...     "aggregated_quantity": [10, 10, 20, 20]
+        ... })
+        >>> result = geks_jevons(df)
+        >>> # Returns DataFrame with period and index_value columns
+    """
+    return _geks_base(df, jevons)
 
 
 def _geks_base(df: pl.DataFrame, bilateral_func) -> pl.DataFrame:

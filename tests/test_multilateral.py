@@ -6,7 +6,7 @@ import pytest
 import polars as pl
 import numpy as np
 from datetime import date
-from pyindexnum import geks_fisher, geks_tornqvist, geary_khamis, time_product_dummy
+from pyindexnum import geks_fisher, geks_tornqvist, geks_jevons, geary_khamis, time_product_dummy
 
 
 class TestGEKSIndices:
@@ -90,6 +90,158 @@ class TestGEKSIndices:
 
         with pytest.raises(ValueError, match="require at least 2 products"):
             geks_fisher(df)
+
+
+class TestGEKSJevons:
+    """Test GEKS-Jevons multilateral index."""
+
+    @pytest.fixture
+    def sample_data(self):
+        """Create sample data for testing (3 products, 3 periods)."""
+        return pl.DataFrame({
+            "product_id": ["A", "A", "A", "B", "B", "B", "C", "C", "C"],
+            "period": [
+                date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1),
+                date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1),
+                date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1)
+            ],
+            "aggregated_price": [100, 105, 110, 200, 210, 220, 50, 52, 54],
+            "aggregated_quantity": [10, 10, 10, 20, 20, 20, 5, 5, 5]
+        })
+
+    def test_geks_jevons_basic_structure(self, sample_data):
+        """Test basic GEKS-Jevons output structure."""
+        result = geks_jevons(sample_data)
+
+        # Check structure
+        assert isinstance(result, pl.DataFrame)
+        assert result.columns == ["period", "index_value"]
+        assert result.height == 3  # 3 periods
+
+        # Check base period is 1.0
+        assert result.filter(pl.col("period") == date(2023, 1, 1)).select("index_value").item() == pytest.approx(1.0)
+
+    def test_geks_jevons_values(self, sample_data):
+        """Test GEKS-Jevons with hand-computed expected values.
+
+        With 3 products (A, B, C) and 3 periods, the bilateral Jevons indices are:
+        J(0,1) = (105/100 * 210/200 * 52/50)^(1/3) = (1.05 * 1.05 * 1.04)^(1/3)
+        J(0,2) = (110/100 * 220/200 * 54/50)^(1/3)
+        J(1,2) = (110/105 * 220/210 * 54/52)^(1/3)
+
+        Since Jevons is transitive (satisfies the circular test) with complete data,
+        GEKS-Jevons reduces to the bilateral Jevons index.
+        """
+        result = geks_jevons(sample_data)
+
+        # Hand-computed bilateral Jevons values
+        expected_2 = (1.05 * 1.05 * 1.04) ** (1 / 3)  # J(0,1) ≈ 1.046656
+        expected_3 = (1.10 * 1.10 * 1.08) ** (1 / 3)  # J(0,2) ≈ 1.093293
+
+        assert result.filter(pl.col("period") == date(2023, 2, 1)).select("index_value").item() == pytest.approx(expected_2, abs=1e-6)
+        assert result.filter(pl.col("period") == date(2023, 3, 1)).select("index_value").item() == pytest.approx(expected_3, abs=1e-6)
+
+    def test_geks_jevons_equals_bilateral_jevons_constant_quantities(self, sample_data):
+        """Test that GEKS-Jevons matches bilateral Jevons with complete balanced data.
+
+        Since Jevons is transitive and data is complete and balanced,
+        the GEKS combination should produce the same result as the bilateral Jevons.
+        This is because P_J is transitive: P_J(0,t) = P_J(0,k) * P_J(k,t) for all k,
+        so the GEKS geometric average collapses to P_J(0,t).
+        """
+        from pyindexnum import jevons
+
+        result = geks_jevons(sample_data)
+
+        # Compute bilateral Jevons for period 2 vs period 1
+        bilateral_df = pl.DataFrame({
+            "product_id": ["A", "A", "B", "B", "C", "C"],
+            "date": [
+                date(2023, 1, 1), date(2023, 2, 1),
+                date(2023, 1, 1), date(2023, 2, 1),
+                date(2023, 1, 1), date(2023, 2, 1)
+            ],
+            "price": [100, 105, 200, 210, 50, 52]
+        })
+        bilateral_val = jevons(bilateral_df)
+        geks_val = result.filter(pl.col("period") == date(2023, 2, 1)).select("index_value").item()
+        assert geks_val == pytest.approx(bilateral_val, abs=1e-10)
+
+    def test_geks_jevons_increasing_prices(self):
+        """Test GEKS-Jevons with monotonically increasing prices."""
+        df = pl.DataFrame({
+            "product_id": ["A", "A", "A", "B", "B", "B"],
+            "period": [
+                date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1),
+                date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1)
+            ],
+            "aggregated_price": [100, 110, 120, 200, 220, 240],
+            "aggregated_quantity": [10, 10, 10, 20, 20, 20]
+        })
+        result = geks_jevons(df)
+
+        # All index values should be > 1 for periods after base
+        for i in range(1, result.height):
+            val = result[i, "index_value"]
+            assert val > 1.0
+
+        # Index values should be monotonically increasing
+        values = result.sort("period").select("index_value").to_series().to_list()
+        for i in range(1, len(values)):
+            assert values[i] >= values[i - 1]
+
+    def test_geks_jevons_quantity_invariant(self):
+        """Test that GEKS-Jevons is invariant to quantity changes.
+
+        Since Jevons is an unweighted index, changing quantities should not
+        affect the result.
+        """
+        df_fixed_qty = pl.DataFrame({
+            "product_id": ["A", "A", "B", "B"],
+            "period": [date(2023, 1, 1), date(2023, 2, 1),
+                       date(2023, 1, 1), date(2023, 2, 1)],
+            "aggregated_price": [100, 110, 200, 210],
+            "aggregated_quantity": [10, 10, 20, 20]
+        })
+        df_var_qty = pl.DataFrame({
+            "product_id": ["A", "A", "B", "B"],
+            "period": [date(2023, 1, 1), date(2023, 2, 1),
+                       date(2023, 1, 1), date(2023, 2, 1)],
+            "aggregated_price": [100, 110, 200, 210],
+            "aggregated_quantity": [10, 50, 20, 100]  # Very different quantities
+        })
+
+        result_fixed = geks_jevons(df_fixed_qty)
+        result_var = geks_jevons(df_var_qty)
+
+        val_fixed = result_fixed.filter(pl.col("period") == date(2023, 2, 1)).select("index_value").item()
+        val_var = result_var.filter(pl.col("period") == date(2023, 2, 1)).select("index_value").item()
+
+        assert val_fixed == pytest.approx(val_var, abs=1e-10)
+
+    def test_geks_jevons_insufficient_periods(self):
+        """Test GEKS-Jevons with insufficient periods."""
+        df = pl.DataFrame({
+            "product_id": ["A", "B"],
+            "period": [date(2023, 1, 1), date(2023, 1, 1)],
+            "aggregated_price": [100, 200],
+            "aggregated_quantity": [10, 20]
+        })
+
+        with pytest.raises(ValueError, match="require at least 2 periods"):
+            geks_jevons(df)
+
+    def test_geks_jevons_insufficient_products(self):
+        """Test GEKS-Jevons with insufficient products."""
+        df = pl.DataFrame({
+            "product_id": ["A", "A"],
+            "period": [date(2023, 1, 1), date(2023, 2, 1)],
+            "aggregated_price": [100, 105],
+            "aggregated_quantity": [10, 10]
+        })
+
+        with pytest.raises(ValueError, match="require at least 2 products"):
+            geks_jevons(df)
 
 
 class TestGearyKhamis:

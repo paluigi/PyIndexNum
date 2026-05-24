@@ -92,6 +92,7 @@ extended_idx = pin.movement_splice(geks_fisher_idx1, geks_fisher_idx2)
 |-------|--------|-------------|
 | **GEKS-Fisher** | Chained Fisher indices | Most widely used multilateral method |
 | **GEKS-Törnqvist** | Chained Törnqvist indices | Alternative chaining approach |
+| **GEKS-Jevons** | Unweighted geometric mean of price relatives | Transitive multilateral index (no quantity) |
 | **Geary-Khamis** | System of equations | Global approach |
 | **Time Product Dummy** | Regression-based | WLS with expenditure shares or unweighted OLS |
 

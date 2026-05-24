@@ -97,7 +97,7 @@ class TestGEKSJevons:
 
     @pytest.fixture
     def sample_data(self):
-        """Create sample data for testing (3 products, 3 periods)."""
+        """Create sample data with quantity for testing (3 products, 3 periods)."""
         return pl.DataFrame({
             "product_id": ["A", "A", "A", "B", "B", "B", "C", "C", "C"],
             "period": [
@@ -107,6 +107,19 @@ class TestGEKSJevons:
             ],
             "aggregated_price": [100, 105, 110, 200, 210, 220, 50, 52, 54],
             "aggregated_quantity": [10, 10, 10, 20, 20, 20, 5, 5, 5]
+        })
+
+    @pytest.fixture
+    def sample_data_no_quantity(self):
+        """Create sample data without quantity column (3 products, 3 periods)."""
+        return pl.DataFrame({
+            "product_id": ["A", "A", "A", "B", "B", "B", "C", "C", "C"],
+            "period": [
+                date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1),
+                date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1),
+                date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1)
+            ],
+            "aggregated_price": [100, 105, 110, 200, 210, 220, 50, 52, 54]
         })
 
     def test_geks_jevons_basic_structure(self, sample_data):
@@ -127,7 +140,6 @@ class TestGEKSJevons:
         With 3 products (A, B, C) and 3 periods, the bilateral Jevons indices are:
         J(0,1) = (105/100 * 210/200 * 52/50)^(1/3) = (1.05 * 1.05 * 1.04)^(1/3)
         J(0,2) = (110/100 * 220/200 * 54/50)^(1/3)
-        J(1,2) = (110/105 * 220/210 * 54/52)^(1/3)
 
         Since Jevons is transitive (satisfies the circular test) with complete data,
         GEKS-Jevons reduces to the bilateral Jevons index.
@@ -176,7 +188,6 @@ class TestGEKSJevons:
                 date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1)
             ],
             "aggregated_price": [100, 110, 120, 200, 220, 240],
-            "aggregated_quantity": [10, 10, 10, 20, 20, 20]
         })
         result = geks_jevons(df)
 
@@ -219,13 +230,35 @@ class TestGEKSJevons:
 
         assert val_fixed == pytest.approx(val_var, abs=1e-10)
 
+    def test_geks_jevons_no_quantity_column(self, sample_data_no_quantity):
+        """Test that GEKS-Jevons works without a quantity column.
+
+        Since Jevons is an unweighted index, the quantity column should be
+        entirely optional.
+        """
+        result = geks_jevons(sample_data_no_quantity)
+
+        assert isinstance(result, pl.DataFrame)
+        assert result.columns == ["period", "index_value"]
+        assert result.height == 3
+        assert result.filter(pl.col("period") == date(2023, 1, 1)).select("index_value").item() == pytest.approx(1.0)
+
+        # Should produce the same values as with quantity column
+        df_with_qty = sample_data_no_quantity.with_columns(
+            pl.lit(10).alias("aggregated_quantity")
+        )
+        result_with_qty = geks_jevons(df_with_qty)
+
+        vals_no = result.sort("period").select("index_value").to_series().to_list()
+        vals_with = result_with_qty.sort("period").select("index_value").to_series().to_list()
+        assert vals_no == pytest.approx(vals_with, abs=1e-10)
+
     def test_geks_jevons_insufficient_periods(self):
         """Test GEKS-Jevons with insufficient periods."""
         df = pl.DataFrame({
             "product_id": ["A", "B"],
             "period": [date(2023, 1, 1), date(2023, 1, 1)],
             "aggregated_price": [100, 200],
-            "aggregated_quantity": [10, 20]
         })
 
         with pytest.raises(ValueError, match="require at least 2 periods"):
@@ -237,7 +270,6 @@ class TestGEKSJevons:
             "product_id": ["A", "A"],
             "period": [date(2023, 1, 1), date(2023, 2, 1)],
             "aggregated_price": [100, 105],
-            "aggregated_quantity": [10, 10]
         })
 
         with pytest.raises(ValueError, match="require at least 2 products"):

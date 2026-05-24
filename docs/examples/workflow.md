@@ -168,6 +168,16 @@ geks_fisher_idx = pin.geks_fisher(df_agg)
 print(f"GEKS-Fisher Index (Jan-Mar): {geks_fisher_idx:.4f}")
 ```
 
+### GEKS-Jevons (Unweighted)
+
+GEKS-Jevons is an unweighted multilateral index — it does not require quantity data:
+
+```python
+# GEKS-Jevons index (no quantity column needed)
+geks_jevons_idx = pin.geks_jevons(df_agg)
+print(f"GEKS-Jevons Index (Jan-Mar): {geks_jevons_idx:.4f}")
+```
+
 ## Step 6: Apply Extension Methods (Optional)
 
 For chained multilateral indices:

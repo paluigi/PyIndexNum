@@ -9,7 +9,7 @@ import polars as pl
 import numpy as np
 from scipy.optimize import root_scalar
 from typing import Optional
-from .bilateral import fisher, tornqvist
+from .bilateral import fisher, tornqvist, jevons
 
 
 def geks_fisher(df: pl.DataFrame) -> pl.DataFrame:
@@ -87,9 +87,64 @@ def geks_tornqvist(df: pl.DataFrame) -> pl.DataFrame:
     return _geks_base(df, tornqvist)
 
 
-def _geks_base(df: pl.DataFrame, bilateral_func) -> pl.DataFrame:
-    """Helper for GEKS indices computation."""
-    _validate_multilateral_input(df)
+def geks_jevons(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Compute the GEKS-Jevons multilateral price index.
+
+    The GEKS method applied using the Jevons (unweighted geometric mean of
+    price relatives) index as the underlying bilateral formula. Since the
+    Jevons index is unweighted, only price information is required — no
+    quantity column is necessary.
+
+    Formula: P_geks-J(0,t) = product_{k=0}^{T-1} [P_J(k,t) / P_J(k,0)]^(1/T)
+
+    where P_J(a,b) is the Jevons bilateral index between periods a and b:
+    P_J(a,b) = [prod_{i=1}^{N} (p_i^b / p_i^a)]^(1/N)
+
+    GEKS-Jevons is particularly useful for web-scraped data where quantity
+    information is unavailable. Despite being unweighted, it has been found
+    to outperform some weighted bilateral methods in empirical studies.
+
+    Args:
+        df: Polars DataFrame with columns ("product_id", "period",
+            "aggregated_price") containing data for multiple periods,
+            with each product having exactly one price per period.
+            The "aggregated_quantity" column is optional and, if present,
+            will be ignored (Jevons is an unweighted index).
+
+    Returns:
+        DataFrame with columns "period" (Date) and "index_value" (float),
+        where index_value represents the multilateral price index for each period
+        relative to the base period (first chronological period = 1.0).
+
+    Raises:
+        ValueError: If DataFrame doesn't meet requirements (see _validate_multilateral_input).
+
+    Examples:
+        >>> import polars as pl
+        >>> df = pl.DataFrame({
+        ...     "product_id": ["A", "A", "B", "B"],
+        ...     "period": [pl.date(2023, 1, 1), pl.date(2023, 2, 1), pl.date(2023, 1, 1), pl.date(2023, 2, 1)],
+        ...     "aggregated_price": [100, 110, 200, 210],
+        ... })
+        >>> result = geks_jevons(df)
+        >>> # Returns DataFrame with period and index_value columns
+    """
+    return _geks_base(df, jevons, weighted=False)
+
+
+def _geks_base(df: pl.DataFrame, bilateral_func, weighted: bool = True) -> pl.DataFrame:
+    """Helper for GEKS indices computation.
+
+    Args:
+        df: Input DataFrame.
+        bilateral_func: Bilateral index function to use (e.g., fisher, jevons).
+        weighted: If True, require aggregated_quantity column. If False, only
+            require aggregated_price (suitable for unweighted indices like Jevons).
+    """
+    _validate_multilateral_input(df, weighted)
+
+    has_quantity = "aggregated_quantity" in df.columns
 
     periods = df.select("period").unique().sort("period").to_series().to_list()
     T = len(periods)
@@ -120,14 +175,24 @@ def _geks_base(df: pl.DataFrame, bilateral_func) -> pl.DataFrame:
                 base_df, curr_df = df_j, df_i
 
             # Create bilateral dataframe format expected by bilateral functions
-            bilateral_df = pl.concat([
-                base_df.select(["product_id", "aggregated_price", "aggregated_quantity"])
-                    .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
-                    .with_columns(pl.lit(base_p).alias("date")),
-                curr_df.select(["product_id", "aggregated_price", "aggregated_quantity"])
-                    .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
-                    .with_columns(pl.lit(curr_p).alias("date"))
-            ])
+            if has_quantity:
+                bilateral_df = pl.concat([
+                    base_df.select(["product_id", "aggregated_price", "aggregated_quantity"])
+                        .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
+                        .with_columns(pl.lit(base_p).alias("date")),
+                    curr_df.select(["product_id", "aggregated_price", "aggregated_quantity"])
+                        .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
+                        .with_columns(pl.lit(curr_p).alias("date"))
+                ])
+            else:
+                bilateral_df = pl.concat([
+                    base_df.select(["product_id", "aggregated_price"])
+                        .rename({"aggregated_price": "price"})
+                        .with_columns(pl.lit(base_p).alias("date")),
+                    curr_df.select(["product_id", "aggregated_price"])
+                        .rename({"aggregated_price": "price"})
+                        .with_columns(pl.lit(curr_p).alias("date"))
+                ])
 
             try:
                 # Calculate bilateral index
@@ -418,5 +483,3 @@ def _validate_multilateral_input(df: pl.DataFrame, weighted: bool = True) -> Non
             min_quantity = df.select(pl.col("aggregated_quantity").min()).item()
             if min_quantity <= 0:
                 raise ValueError("All aggregated_quantity values must be positive")
-
-    

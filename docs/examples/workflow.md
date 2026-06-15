@@ -173,9 +173,9 @@ print(geks_fisher_idx)
 GEKS-Jevons is an unweighted multilateral index — it does not require quantity data:
 
 ```python
-# GEKS-Jevons index (no quantity column needed)
+# GEKS-Jevons index (no quantity column needed, returns a DataFrame)
 geks_jevons_idx = pin.geks_jevons(df_agg)
-print(f"GEKS-Jevons Index (Jan-Mar): {geks_jevons_idx:.4f}")
+print(geks_jevons_idx)
 ```
 
 ## Step 6: Apply Extension Methods (Optional)

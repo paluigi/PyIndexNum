@@ -7,7 +7,6 @@ that compare prices across multiple time periods simultaneously.
 
 import polars as pl
 import numpy as np
-from scipy.optimize import root_scalar
 from typing import Optional
 from .bilateral import fisher, tornqvist
 
@@ -256,9 +255,9 @@ def time_product_dummy(df: pl.DataFrame, weighted: bool = True) -> pl.DataFrame:
             Contains data for multiple periods, with each product having exactly
             one price per period.
         weighted: If True, use weighted least squares with expenditure shares
-                 (p*q / sum(p*q) per period) as weights. If False, use unweighted OLS.
-                 If no quantity column, automatically uses unweighted regardless of
-                 this parameter.
+                 (p*q / sum(p*q) per period) as weights. This requires the
+                 "aggregated_quantity" column to be present. If False, use
+                 unweighted OLS.
 
     Returns:
         DataFrame with columns "period" (Date) and "index_value" (float),
@@ -369,7 +368,7 @@ def _validate_multilateral_input(df: pl.DataFrame, weighted: bool = True) -> Non
 
     Args:
         df: DataFrame to validate
-        weighted: Whether weighted regression is requested, defult True
+        weighted: Whether weighted regression is requested, default True
 
     Raises:
         ValueError: If validation fails

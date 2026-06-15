@@ -4,7 +4,7 @@
 project = 'PyIndexNum'
 copyright = '2026, Luigi Palumbo & Mengting Yu'
 author = 'Luigi Palumbo, Mengting Yu'
-release = '0.1.0'
+release = '0.2.0'
 
 # -- General configuration ---------------------------------------------------
 extensions = [

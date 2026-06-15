@@ -150,7 +150,7 @@ def half_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:
         DataFrame with the full extended index series including all periods from index1 plus the spliced period
 
     Raises:
-        ValueError: If input validation fails or window length is even
+        ValueError: If input validation fails
 
     Examples:
         >>> import polars as pl
@@ -402,11 +402,11 @@ def _validate_indices(index1: pl.DataFrame, index2: pl.DataFrame) -> None:
     non_overlap1 = periods1 - periods2
     non_overlap2 = periods2 - periods1
 
-    # Check that the non overlapping periods are the begin of th e first and end of the second
+    # Check that the non-overlapping periods are the beginning of the first and end of the second
     first_period1 = min(periods1)
     last_period2 = max(periods2)
     if first_period1 not in non_overlap1 or last_period2 not in non_overlap2:
-        raise ValueError("The non-overlappting periods must be the first of index1 and last of index2")
+        raise ValueError("The non-overlapping periods must be the first of index1 and last of index2")
 
     # Check that exactly one period is unique to each index (shifted by one period)
     # For some edge cases (like no overlapping periods), raise a different error

@@ -65,7 +65,13 @@ laspeyres_idx = pin.laspeyres(df_balanced)
 fisher_idx = pin.fisher(df_balanced)
 
 # 5. Calculate multilateral indices (multiple periods)
-geks_fisher_idx = pin.geks_fisher(df_agg)
+# Split data into two overlapping rolling windows
+periods = sorted(df_agg["period"].unique())
+window1 = df_agg.filter(pl.col("period").is_in(periods[:-1]))
+window2 = df_agg.filter(pl.col("period").is_in(periods[1:]))
+
+geks_fisher_idx1 = pin.geks_fisher(window1)
+geks_fisher_idx2 = pin.geks_fisher(window2)
 
 # 6. Apply extension methods (optional)
 extended_idx = pin.movement_splice(geks_fisher_idx1, geks_fisher_idx2)
@@ -139,7 +145,7 @@ df_agg = pin.aggregate_time(df_std, freq="1mo", agg_type="weighted_arithmetic")
 
 # Handle unbalanced panels
 df_balanced = pin.remove_unbalanced(df_agg)
-df_imputed = pin.carry_forward_imputation(df_agg, ["price", "quantity"])
+df_imputed = pin.carry_forward_imputation(df_agg, ["aggregated_price", "aggregated_quantity"])
 ```
 
 ### Index Calculation
@@ -203,7 +209,7 @@ If you use PyIndexNum in your research, please cite:
   title = {PyIndexNum: A Python Library for Economic Index Numbers},
   author = {Palumbo, Luigi, and Yu, Mengting},
   url = {https://github.com/paluigi/PyIndexNum},
-  version = {0.1.2},
+  version = {0.2.0},
 }
 ```
 

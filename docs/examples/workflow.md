@@ -163,17 +163,26 @@ Törnqvist Index: 1.0509
 For data spanning multiple periods, use multilateral methods:
 
 ```python
-# GEKS-Fisher index for all three months
+# GEKS-Fisher index for all three months (returns a DataFrame)
 geks_fisher_idx = pin.geks_fisher(df_agg)
-print(f"GEKS-Fisher Index (Jan-Mar): {geks_fisher_idx:.4f}")
+print(geks_fisher_idx)
 ```
 
 ## Step 6: Apply Extension Methods (Optional)
 
-For chained multilateral indices:
+For chained multilateral indices, compute indices on two overlapping rolling
+windows and splice them together:
 
 ```python
-# Example of movement splicing for extending the index
+# Split the aggregated data into two overlapping rolling windows
+periods = sorted(df_agg["period"].unique())
+window1 = df_agg.filter(pl.col("period").is_in(periods[:-1]))
+window2 = df_agg.filter(pl.col("period").is_in(periods[1:]))
+
+geks_fisher_idx1 = pin.geks_fisher(window1)
+geks_fisher_idx2 = pin.geks_fisher(window2)
+
+# Movement splice connects the two windows
 extended_indices = pin.movement_splice(geks_fisher_idx1, geks_fisher_idx2)
 print("Extended indices:", extended_indices)
 ```

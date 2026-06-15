@@ -98,6 +98,7 @@ extended_idx = pin.movement_splice(geks_fisher_idx1, geks_fisher_idx2)
 |-------|--------|-------------|
 | **GEKS-Fisher** | Chained Fisher indices | Most widely used multilateral method |
 | **GEKS-Törnqvist** | Chained Törnqvist indices | Alternative chaining approach |
+| **GEKS-Jevons** | Unweighted geometric mean of price relatives | Transitive multilateral index (no quantity) |
 | **Geary-Khamis** | System of equations | Global approach |
 | **Time Product Dummy** | Regression-based | WLS with expenditure shares or unweighted OLS |
 
@@ -116,7 +117,7 @@ Your data should contain:
 - **Date column**: Date or datetime values
 - **Price column**: Numeric price observations
 - **Product ID column**: Unique identifier for each product/variety
-- **Quantity column**: Numeric quantities (required for weighted indices)
+- **Quantity column**: Numeric quantities (required for weighted indices, optional for unweighted methods like GEKS-Jevons)
 
 Example data structure:
 ```
@@ -159,6 +160,9 @@ fisher = pin.fisher(df)
 # Multilateral indices
 geks = pin.geks_fisher(df)
 gk = pin.geary_khamis(df)
+
+# Unweighted multilateral index (no quantity required)
+geks_j = pin.geks_jevons(df)
 ```
 
 ### Extensions

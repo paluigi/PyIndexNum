@@ -68,11 +68,17 @@ Description: The geometric mean of all possible bilateral indices between a base
 Calculation Mechanism:The price level for period $t$ relative to period $1$ is:
 $$P_{GEKS}^t = \prod_{k=1}^{T} \left( \frac{P_F(p^k, p^t, q^k, q^t)}{P_F(p^k, p^1, q^k, q^1)} \right)^{1/T}$$
 
-2.2 CCDI (GEKS-Törnqvist) Index
+2.2 GEKS-Jevons Index
+Description: The GEKS method applied using the Jevons (unweighted geometric mean of price relatives) index as the underlying bilateral formula. Since Jevons is unweighted, no quantity information is required — only prices.
+Inputs:Dataset of prices for periods $1 \dots T$.Bilateral Jevons Function ($P_J$).
+Calculation Mechanism:$$P_{GEKS-J}^t = \prod_{k=1}^{T} \left( \frac{P_J(p^k, p^t)}{P_J(p^k, p^1)} \right)^{1/T}$$
+where $P_J(p^a, p^b) = \prod_{n=1}^{N} \left( \frac{p_n^b}{p_n^a} \right)^{1/N}$ is the bilateral Jevons index.
+
+2.3 CCDI (GEKS-Törnqvist) Index
 Description: The GEKS method applied using the Törnqvist index as the underlying bilateral formula.Inputs:Dataset of prices and shares for periods $1 \dots T$.Bilateral Törnqvist Function ($P_T$).Calculation Mechanism:
 $$P_{CCDI}^t = \prod_{k=1}^{T} \left( \frac{P_T(p^k, p^t, s^k, s^t)}{P_T(p^k, p^1, s^k, s^1)} \right)^{1/T}$$
 
-2.3 Geary-Khamis (GK) Index
+2.4 Geary-Khamis (GK) Index
 Description: An implicit price index that solves for reference prices and period price levels simultaneously.Inputs:$p^t_n$: Price of item $n$ in period $t$.$q^t_n$: Quantity of item $n$ in period $t$.$T$: Number of time periods.$N$: Number of products.Calculation Mechanism:This requires solving a system of equations iteratively.Reference Prices ($\alpha_n$):
 $$\alpha_n = \frac{\sum_{t=1}^{T} (q_{n}^t p_{n}^t / P_{GK}^t)}{\sum_{t=1}^{T} q_{n}^t}$$
 Period Price Levels ($P_{GK}^t$):
@@ -81,7 +87,7 @@ Algorithm:Initialize $P_{GK}^t = 1$ for all $t$.Calculate vector $\alpha$.
 Update vector $P_{GK}$.
 Repeat until $P_{GK}$ converges.
 
-2.4 Time Product Dummy (TPD) Index
+2.5 Time Product Dummy (TPD) Index
 Description: A regression-based approach estimating price levels ($\pi_t$) and item effects ($\alpha_n$) from a panel of data.Weighted TPD
 Inputs:Prices ($p_n^t$) and Expenditure Shares ($s_n^t$) for all $n, t$.
 Calculation Mechanism:Solve the weighted least squares problem:

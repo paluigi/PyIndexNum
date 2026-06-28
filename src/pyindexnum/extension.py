@@ -8,8 +8,7 @@ These methods are used to extend price index series when using rolling windows.
 
 import polars as pl
 import numpy as np
-from typing import
-from datetime import datetime, timedelta
+from datetime import datetime
 
 
 def movement_splice(index1: pl.DataFrame, index2: pl.DataFrame) -> pl.DataFrame:

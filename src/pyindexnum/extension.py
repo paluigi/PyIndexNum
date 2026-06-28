@@ -8,7 +8,7 @@ These methods are used to extend price index series when using rolling windows.
 
 import polars as pl
 import numpy as np
-from typing import Tuple, List
+from typing import
 from datetime import datetime, timedelta
 
 
@@ -305,7 +305,7 @@ def fixed_base_rolling_window(index1: pl.DataFrame, index2: pl.DataFrame, base_p
         DataFrame with the full extended index series including all periods from index1 plus the spliced period
 
     Raises:
-        ValueError: If input validation fails
+        ValueError: If input validation fails or if base_period is not found in both indices
 
     Examples:
         >>> import polars as pl
@@ -327,18 +327,30 @@ def fixed_base_rolling_window(index1: pl.DataFrame, index2: pl.DataFrame, base_p
     sorted_idx1 = index1.sort("period")
     sorted_idx2 = index2.sort("period")
 
+    # Parse base_period; try to match the column's temporal type (date or datetime)
     base_period_date = datetime.strptime(base_period, "%Y-%m-%d").date()
+    # If the period column is datetime, we need to compare as datetime
+    if sorted_idx1.schema["period"].base_type() == pl.Datetime:
+        from datetime import datetime as dt
+        base_period_date = dt.combine(base_period_date, datetime.min.time())
+
     last_period_idx2 = sorted_idx2.select(pl.col("period").max()).item()
+
+    # Ensure base_period exists in both indices
+    if base_period_date not in sorted_idx1.select("period").to_series().to_list():
+        raise ValueError(f"base_period {base_period} not found in index1")
+    if base_period_date not in sorted_idx2.select("period").to_series().to_list():
+        raise ValueError(f"base_period {base_period} not found in index2")
 
     base_index_idx1 = sorted_idx1.filter(pl.col("period") == base_period_date).select("index_value").item()
     base_index_idx2 = sorted_idx2.filter(pl.col("period") == base_period_date).select("index_value").item()
     last_index_idx2 = sorted_idx2.filter(pl.col("period") == last_period_idx2).select("index_value").item()
 
     # Calculate link rate of change (from base period to last period in index2)
-    link_rate = last_index_idx2 / base_index_idx1
+    link_rate = last_index_idx2 / base_index_idx2
 
-    # Calculate spliced index by applying the window rate to the second period of index1
-    spliced_index = base_index_idx2 * link_rate
+    # Calculate spliced index by applying the link rate to the base period of index1
+    spliced_index = base_index_idx1 * link_rate
 
     # Create result DataFrame
     spliced_df = pl.DataFrame({
@@ -348,8 +360,6 @@ def fixed_base_rolling_window(index1: pl.DataFrame, index2: pl.DataFrame, base_p
 
     # Return the full extended series
     return pl.concat([index1, spliced_df])
-
-
 def _validate_indices(index1: pl.DataFrame, index2: pl.DataFrame) -> None:
     """
     Validate input indices for extension methods.

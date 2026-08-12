@@ -213,7 +213,7 @@ If you use PyIndexNum in your research, please cite:
   title = {PyIndexNum: A Python Library for Economic Index Numbers},
   author = {Palumbo, Luigi, and Yu, Mengting},
   url = {https://github.com/paluigi/PyIndexNum},
-  version = {0.2.0},
+  version = {0.3.0},
 }
 ```
 

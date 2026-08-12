@@ -17,4 +17,4 @@ from .bilateral import jevons, dutot, carli, laspeyres, paasche, fisher, tornqvi
 from .multilateral import geks_fisher, geks_tornqvist, geks_jevons, geary_khamis, time_product_dummy
 from .extension import movement_splice, window_splice, half_splice, mean_splice, fixed_base_rolling_window
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

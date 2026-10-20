@@ -541,6 +541,24 @@ class TestGetSummary:
         # Check quantity present
         assert result["quantity"] is True
 
+    def test_custom_column_names(self):
+        """Test summary with custom column names."""
+        df = pl.DataFrame({
+            "time": [date(2023, 1, 1), date(2023, 1, 2), date(2023, 1, 3)],
+            "cost": [100.0, 110.0, 120.0],
+            "sku": ["A", "B", "A"],
+            "units": [10, 5, 8],
+        })
+
+        result = get_summary(df, id_col="sku", date_col="time", quantity_col="units")
+
+        assert result == {
+            "n_products": 2,
+            "start_date": date(2023, 1, 1),
+            "end_date": date(2023, 1, 3),
+            "quantity": True,
+        }
+
 
 class TestRemoveUnbalanced:
     """Test suite for remove_unbalanced function."""
@@ -656,6 +674,33 @@ class TestRemoveUnbalanced:
 
         with pytest.raises(ValueError, match="Missing required columns"):
             remove_unbalanced(df)
+
+    def test_custom_column_names(self):
+        """Test removing unbalanced products with custom column names."""
+        df = pl.DataFrame({
+            "sku": ["A", "A", "A", "B", "B", "C"],
+            "month": [
+                date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1),
+                date(2023, 1, 1), date(2023, 2, 1),
+                date(2023, 1, 1)
+            ],
+            "avg_price": [100, 110, 120, 200, 210, 300]
+        })
+
+        result = remove_unbalanced(df, id_col="sku", period_col="month")
+
+        assert result["sku"].unique().to_list() == ["A"]
+        assert len(result) == 3
+
+    def test_custom_column_missing(self):
+        """Test that a missing custom column raises."""
+        df = pl.DataFrame({
+            "product_id": ["A", "A"],
+            "period": [date(2023, 1, 1), date(2023, 2, 1)],
+            "aggregated_price": [100, 110]
+        })
+        with pytest.raises(ValueError, match="Missing required columns"):
+            remove_unbalanced(df, id_col="sku")
 
 
 @pytest.fixture

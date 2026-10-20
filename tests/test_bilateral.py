@@ -4,7 +4,16 @@ Tests for bilateral price index functions.
 Regression tests use performance_price_data.csv with expected values from
 the R PriceIndices library (gold standard). Unit tests use small synthetic
 datasets with hand-computed expected values.
+
+Since 0.4.0 all bilateral functions consume the canonical panel schema
+emitted by aggregate_time (period / product_id / aggregated_price /
+aggregated_quantity); custom and legacy column names are supported via
+the *_col keyword arguments, and unbalanced two-period comparisons via
+balanced=False.
 """
+
+import warnings
+from datetime import date
 
 import pytest
 import polars as pl
@@ -41,17 +50,32 @@ R_EXPECTED = {
 TOLERANCE_R = 1e-5
 
 
+# (function, requires quantity) pairs used by the parametrized sweeps
+BILATERAL_FUNCS = [
+    pytest.param(jevons, False, id="jevons"),
+    pytest.param(carli, False, id="carli"),
+    pytest.param(dutot, False, id="dutot"),
+    pytest.param(laspeyres, True, id="laspeyres"),
+    pytest.param(paasche, True, id="paasche"),
+    pytest.param(fisher, True, id="fisher"),
+    pytest.param(tornqvist, True, id="tornqvist"),
+    pytest.param(walsh, True, id="walsh"),
+]
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def perf_data():
-    """Load and preprocess performance_price_data.csv for 2024-01 -> 2024-02."""
-    df = pl.read_csv("tests/performance_price_data.csv")
+def perf_panel(perf_raw):
+    """aggregate_time output for 2024-01 -> 2024-02, balanced.
+
+    The aggregation output feeds every index function directly — no renames.
+    """
     df = standardize_columns(
-        df,
+        perf_raw,
         date_col="time",
         price_col="prices",
         id_col="prodID",
@@ -66,63 +90,24 @@ def perf_data():
         agg_type="weighted_arithmetic",
         freq="1mo",
     )
-    agg = agg.rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
     balanced = remove_unbalanced(agg)
-    balanced = balanced.rename({"period": "date"})
-
-    start_dt = pl.lit("2024-01-01").str.strptime(pl.Date, "%Y-%m-%d")
-    end_dt = pl.lit("2024-02-01").str.strptime(pl.Date, "%Y-%m-%d")
-    balanced = balanced.filter(
-        (pl.col("date") == start_dt) | (pl.col("date") == end_dt)
+    return balanced.filter(
+        pl.col("period").is_in([date(2024, 1, 1), date(2024, 2, 1)])
     )
-    return balanced
-
-
-@pytest.fixture
-def perf_unweighted(perf_data):
-    """Preprocessed data without quantity column (for unweighted indices)."""
-    return perf_data.select("date", "price", "product_id")
 
 
 # ---------------------------------------------------------------------------
-# Regression tests against R PriceIndices
+# Regression tests: aggregate_time output feeds every bilateral function
+# directly (the unified-schema bug fix) and matches the gold-standard values
 # ---------------------------------------------------------------------------
 
 
 class TestRegressionR:
-    """Validate all bilateral indices against R PriceIndices gold standard."""
+    """Validate all bilateral indices on aggregate_time output against gold-standard values."""
 
-    def test_jevons(self, perf_unweighted):
-        result = jevons(perf_unweighted)
-        assert abs(result - R_EXPECTED["jevons"]) < TOLERANCE_R
-
-    def test_carli(self, perf_unweighted):
-        result = carli(perf_unweighted)
-        assert abs(result - R_EXPECTED["carli"]) < TOLERANCE_R
-
-    def test_dutot(self, perf_unweighted):
-        result = dutot(perf_unweighted)
-        assert abs(result - R_EXPECTED["dutot"]) < TOLERANCE_R
-
-    def test_laspeyres(self, perf_data):
-        result = laspeyres(perf_data)
-        assert abs(result - R_EXPECTED["laspeyres"]) < TOLERANCE_R
-
-    def test_paasche(self, perf_data):
-        result = paasche(perf_data)
-        assert abs(result - R_EXPECTED["paasche"]) < TOLERANCE_R
-
-    def test_fisher(self, perf_data):
-        result = fisher(perf_data)
-        assert abs(result - R_EXPECTED["fisher"]) < TOLERANCE_R
-
-    def test_tornqvist(self, perf_data):
-        result = tornqvist(perf_data)
-        assert abs(result - R_EXPECTED["tornqvist"]) < TOLERANCE_R
-
-    def test_walsh(self, perf_data):
-        result = walsh(perf_data)
-        assert abs(result - R_EXPECTED["walsh"]) < TOLERANCE_R
+    @pytest.mark.parametrize("func,weighted", BILATERAL_FUNCS)
+    def test_direct_feed_matches_reference(self, perf_panel, func, weighted):
+        assert abs(func(perf_panel) - R_EXPECTED[func.__name__]) < TOLERANCE_R
 
 
 # ---------------------------------------------------------------------------
@@ -135,28 +120,28 @@ class TestRegressionR:
 
 SYNTH_UNWEIGHTED = pl.DataFrame(
     {
-        "date": [
+        "period": [
             "2023-01-01",
             "2023-01-01",
             "2023-02-01",
             "2023-02-01",
         ],
         "product_id": ["A", "B", "A", "B"],
-        "price": [100.0, 200.0, 110.0, 190.0],
+        "aggregated_price": [100.0, 200.0, 110.0, 190.0],
     }
 )
 
 SYNTH_WEIGHTED = pl.DataFrame(
     {
-        "date": [
+        "period": [
             "2023-01-01",
             "2023-01-01",
             "2023-02-01",
             "2023-02-01",
         ],
         "product_id": ["A", "B", "A", "B"],
-        "price": [100.0, 200.0, 110.0, 190.0],
-        "quantity": [10, 20, 15, 25],
+        "aggregated_price": [100.0, 200.0, 110.0, 190.0],
+        "aggregated_quantity": [10, 20, 15, 25],
     }
 )
 
@@ -176,9 +161,9 @@ class TestJevonsUnit:
     def test_single_product(self):
         df = pl.DataFrame(
             {
-                "date": ["2023-01-01", "2023-02-01"],
+                "period": ["2023-01-01", "2023-02-01"],
                 "product_id": ["A", "A"],
-                "price": [100.0, 110.0],
+                "aggregated_price": [100.0, 110.0],
             }
         )
         assert abs(jevons(df) - 1.1) < TOL
@@ -197,9 +182,9 @@ class TestCarliUnit:
     def test_single_product(self):
         df = pl.DataFrame(
             {
-                "date": ["2023-01-01", "2023-02-01"],
+                "period": ["2023-01-01", "2023-02-01"],
                 "product_id": ["A", "A"],
-                "price": [100.0, 110.0],
+                "aggregated_price": [100.0, 110.0],
             }
         )
         assert abs(carli(df) - 1.1) < TOL
@@ -219,9 +204,9 @@ class TestDutotUnit:
     def test_single_product(self):
         df = pl.DataFrame(
             {
-                "date": ["2023-01-01", "2023-02-01"],
+                "period": ["2023-01-01", "2023-02-01"],
                 "product_id": ["A", "A"],
-                "price": [100.0, 110.0],
+                "aggregated_price": [100.0, 110.0],
             }
         )
         assert abs(dutot(df) - 1.1) < TOL
@@ -262,12 +247,12 @@ class TestFisherUnit:
     def test_time_reversal(self):
         """Fisher(t,0) * Fisher(0,t) = 1."""
         df_rev = SYNTH_WEIGHTED.with_columns(
-            pl.when(pl.col("date") == "2023-01-01")
+            pl.when(pl.col("period") == "2023-01-01")
             .then(pl.lit("2023-02-01"))
-            .when(pl.col("date") == "2023-02-01")
+            .when(pl.col("period") == "2023-02-01")
             .then(pl.lit("2023-01-01"))
-            .otherwise(pl.col("date"))
-            .alias("date")
+            .otherwise(pl.col("period"))
+            .alias("period")
         )
         fwd = fisher(SYNTH_WEIGHTED)
         rev = fisher(df_rev)
@@ -355,38 +340,229 @@ class TestWalshUnit:
 
 
 # ---------------------------------------------------------------------------
+# Custom column names
+# ---------------------------------------------------------------------------
+
+
+CUSTOM_RENAME = {
+    "period": "month",
+    "aggregated_price": "avg_price",
+    "product_id": "sku",
+    "aggregated_quantity": "total_qty",
+}
+
+
+class TestCustomColumns:
+    """User-defined column names produce identical results to canonical names."""
+
+    @pytest.mark.parametrize("func,weighted", BILATERAL_FUNCS)
+    def test_custom_names_match_canonical(self, func, weighted):
+        canonical = SYNTH_WEIGHTED if weighted else SYNTH_UNWEIGHTED
+        if weighted:
+            custom = canonical.rename(CUSTOM_RENAME)
+        else:
+            custom = canonical.rename(
+                {k: v for k, v in CUSTOM_RENAME.items() if k != "aggregated_quantity"}
+            )
+        kwargs = {"period_col": "month", "price_col": "avg_price", "id_col": "sku"}
+        if weighted:
+            kwargs["quantity_col"] = "total_qty"
+        assert func(custom, **kwargs) == pytest.approx(func(canonical), rel=1e-12)
+
+    def test_missing_custom_column(self):
+        custom = SYNTH_UNWEIGHTED.rename({"period": "month"})
+        with pytest.raises(ValueError, match="Missing required columns"):
+            jevons(custom, period_col="nonexistent")
+
+    def test_rename_collision(self):
+        custom = SYNTH_UNWEIGHTED.rename({"period": "month"})
+        custom = custom.with_columns(pl.lit(0).alias("period"))  # junk column
+        with pytest.raises(ValueError, match="Cannot rename column"):
+            jevons(custom, period_col="month")
+
+
+class TestLegacySchema:
+    """Pre-0.4.0 date/price/quantity column names keep working via kwargs."""
+
+    LEGACY_RENAME = {
+        "period": "date",
+        "aggregated_price": "price",
+        "aggregated_quantity": "quantity",
+    }
+
+    @pytest.mark.parametrize("func,weighted", BILATERAL_FUNCS)
+    def test_legacy_columns_via_kwargs(self, func, weighted):
+        canonical = SYNTH_WEIGHTED if weighted else SYNTH_UNWEIGHTED
+        if weighted:
+            legacy = canonical.rename(self.LEGACY_RENAME)
+        else:
+            legacy = canonical.rename(
+                {k: v for k, v in self.LEGACY_RENAME.items() if k != "aggregated_quantity"}
+            )
+        kwargs = {"period_col": "date", "price_col": "price", "id_col": "product_id"}
+        if weighted:
+            kwargs["quantity_col"] = "quantity"
+        assert func(legacy, **kwargs) == pytest.approx(func(canonical), rel=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Unbalanced panels (balanced=False)
+#
+# Data: base period has products {A, B, C}, current period has {A, B, D}.
+# The matched set is {A, B} with the same values as SYNTH_WEIGHTED.
+# ---------------------------------------------------------------------------
+
+UNBAL_UNWEIGHTED = pl.DataFrame(
+    {
+        "period": [
+            "2023-01-01",
+            "2023-01-01",
+            "2023-01-01",
+            "2023-02-01",
+            "2023-02-01",
+            "2023-02-01",
+        ],
+        "product_id": ["A", "B", "C", "A", "B", "D"],
+        "aggregated_price": [100.0, 200.0, 300.0, 110.0, 190.0, 400.0],
+    }
+)
+
+UNBAL_WEIGHTED = UNBAL_UNWEIGHTED.with_columns(
+    pl.Series("aggregated_quantity", [10.0, 20.0, 5.0, 15.0, 25.0, 2.0])
+)
+
+MATCHED_SUBSET = UNBAL_WEIGHTED.filter(pl.col("product_id").is_in(["A", "B"]))
+
+
+class TestUnbalancedPanels:
+    """balanced=False computes each index on the matched product set."""
+
+    @pytest.mark.parametrize("func,weighted", BILATERAL_FUNCS)
+    def test_equals_manually_matched_subset(self, func, weighted):
+        df = UNBAL_WEIGHTED if weighted else UNBAL_UNWEIGHTED
+        assert func(df, balanced=False) == pytest.approx(func(MATCHED_SUBSET), rel=1e-12)
+
+    @pytest.mark.parametrize("func,weighted", BILATERAL_FUNCS)
+    def test_strict_default_still_raises(self, func, weighted):
+        df = UNBAL_WEIGHTED if weighted else UNBAL_UNWEIGHTED
+        with pytest.raises(ValueError, match="Products must be identical"):
+            func(df)
+
+    @pytest.mark.parametrize("func,weighted", BILATERAL_FUNCS)
+    def test_panel_warnings_emitted(self, func, weighted):
+        df = UNBAL_WEIGHTED if weighted else UNBAL_UNWEIGHTED
+        with pytest.warns(UserWarning, match="Unbalanced comparison"):
+            func(df, balanced=False, panel_warnings=True)
+
+    @pytest.mark.parametrize("func,weighted", BILATERAL_FUNCS)
+    def test_silent_by_default(self, func, weighted):
+        df = UNBAL_WEIGHTED if weighted else UNBAL_UNWEIGHTED
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            func(df, balanced=False)
+
+    def test_no_common_products(self):
+        df = pl.DataFrame(
+            {
+                "period": ["2023-01-01", "2023-02-01"],
+                "product_id": ["A", "B"],
+                "aggregated_price": [100.0, 200.0],
+            }
+        )
+        with pytest.raises(ValueError, match="No common products"):
+            jevons(df, balanced=False)
+
+    def test_dutot_matched_means(self):
+        # Unmatched Dutot compares means over the matched products {A, B}:
+        # (110 + 190) / 2 over (100 + 200) / 2 = 150 / 150 = 1.0
+        assert dutot(UNBAL_UNWEIGHTED, balanced=False) == pytest.approx(1.0, rel=1e-12)
+
+    def test_tornqvist_shares_renormalised_over_matched_set(self):
+        # Matched products A and B carry the same values as SYNTH_WEIGHTED,
+        # so the matched-sample Tornqvist equals the balanced case computed
+        # on {A, B} only: shares of C (base) and D (current) are excluded.
+        expected = np.exp(-0.01773563)
+        assert tornqvist(UNBAL_WEIGHTED, balanced=False) == pytest.approx(expected, abs=1e-6)
+
+    def test_fisher_threads_flags(self):
+        expected = np.sqrt(
+            laspeyres(MATCHED_SUBSET) * paasche(MATCHED_SUBSET)
+        )
+        assert fisher(UNBAL_WEIGHTED, balanced=False) == pytest.approx(expected, rel=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Matched-sample regression on the performance dataset with product churn:
+# products with sorted rank r are dropped from the second month when
+# r % 10 == 1 and from the first month when r % 10 == 6
+# ---------------------------------------------------------------------------
+
+MATCHED_EXPECTED = {
+    "jevons": 1.09010035769845,
+    "carli": 248.013541588354,
+    "dutot": 1.15171184436301,
+    "laspeyres": 1.08941767299547,
+    "paasche": 1.13327862877501,
+    "fisher": 1.11113175034087,
+    "tornqvist": 1.09100612362932,
+    "walsh": 1.11343141764876,
+}
+
+TOLERANCE_MATCHED = 1e-6
+
+
+@pytest.fixture
+def perf_churned(perf_panel):
+    """Balanced two-month panel with deterministic product churn applied."""
+    prods = sorted(perf_panel["product_id"].unique().to_list())
+    months = sorted(perf_panel["period"].unique().to_list())
+    r = pl.Series([prods.index(p) + 1 for p in perf_panel["product_id"].to_list()])
+    k = pl.Series([months.index(m) + 1 for m in perf_panel["period"].to_list()])
+    keep = ~((k == 2) & (r % 10 == 1)) & ~((k == 1) & (r % 10 == 6))
+    return perf_panel.filter(keep)
+
+
+class TestMatchedSampleRegression:
+    """All bilateral indices on the churned panel against expected values."""
+
+    @pytest.mark.parametrize("func,weighted", BILATERAL_FUNCS)
+    def test_matches_expected(self, perf_churned, func, weighted):
+        assert abs(func(perf_churned, balanced=False) - MATCHED_EXPECTED[func.__name__]) < TOLERANCE_MATCHED
+
+
+# ---------------------------------------------------------------------------
 # Input validation tests
 # ---------------------------------------------------------------------------
 
 
 class TestValidation:
-    def test_wrong_number_of_dates(self):
+    def test_wrong_number_of_periods(self):
         df = pl.DataFrame(
             {
-                "date": ["2023-01-01", "2023-01-01"],
+                "period": ["2023-01-01", "2023-01-01"],
                 "product_id": ["A", "B"],
-                "price": [100.0, 200.0],
+                "aggregated_price": [100.0, 200.0],
             }
         )
-        with pytest.raises(ValueError, match="exactly 2 unique dates"):
+        with pytest.raises(ValueError, match="exactly 2 unique periods"):
             jevons(df)
 
-    def test_three_dates(self):
+    def test_three_periods(self):
         df = pl.DataFrame(
             {
-                "date": ["2023-01-01", "2023-02-01", "2023-03-01"],
+                "period": ["2023-01-01", "2023-02-01", "2023-03-01"],
                 "product_id": ["A", "A", "A"],
-                "price": [100.0, 110.0, 120.0],
+                "aggregated_price": [100.0, 110.0, 120.0],
             }
         )
-        with pytest.raises(ValueError, match="exactly 2 unique dates"):
+        with pytest.raises(ValueError, match="exactly 2 unique periods"):
             jevons(df)
 
     def test_missing_columns(self):
         df = pl.DataFrame(
             {
-                "date": ["2023-01-01", "2023-02-01"],
-                "price": [100.0, 110.0],
+                "period": ["2023-01-01", "2023-02-01"],
+                "aggregated_price": [100.0, 110.0],
             }
         )
         with pytest.raises(ValueError, match="Missing required columns"):
@@ -395,9 +571,9 @@ class TestValidation:
     def test_zero_price(self):
         df = pl.DataFrame(
             {
-                "date": ["2023-01-01", "2023-01-01", "2023-02-01", "2023-02-01"],
+                "period": ["2023-01-01", "2023-01-01", "2023-02-01", "2023-02-01"],
                 "product_id": ["A", "B", "A", "B"],
-                "price": [0.0, 200.0, 110.0, 190.0],
+                "aggregated_price": [0.0, 200.0, 110.0, 190.0],
             }
         )
         with pytest.raises(ValueError, match="All prices must be positive"):
@@ -406,9 +582,9 @@ class TestValidation:
     def test_negative_price(self):
         df = pl.DataFrame(
             {
-                "date": ["2023-01-01", "2023-01-01", "2023-02-01", "2023-02-01"],
+                "period": ["2023-01-01", "2023-01-01", "2023-02-01", "2023-02-01"],
                 "product_id": ["A", "B", "A", "B"],
-                "price": [-100.0, 200.0, 110.0, 190.0],
+                "aggregated_price": [-100.0, 200.0, 110.0, 190.0],
             }
         )
         with pytest.raises(ValueError, match="All prices must be positive"):
@@ -417,37 +593,30 @@ class TestValidation:
     def test_products_differ_between_periods(self):
         df = pl.DataFrame(
             {
-                "date": [
+                "period": [
                     "2023-01-01",
                     "2023-01-01",
                     "2023-02-01",
                     "2023-02-01",
                 ],
                 "product_id": ["A", "B", "A", "C"],
-                "price": [100.0, 200.0, 110.0, 190.0],
+                "aggregated_price": [100.0, 200.0, 110.0, 190.0],
             }
         )
         with pytest.raises(ValueError, match="Products must be identical"):
             jevons(df)
 
     def test_missing_quantity_column(self):
-        df = pl.DataFrame(
-            {
-                "date": ["2023-01-01", "2023-02-01"],
-                "product_id": ["A", "A"],
-                "price": [100.0, 110.0],
-            }
-        )
-        with pytest.raises(ValueError, match="Missing required column: quantity"):
-            laspeyres(df)
+        with pytest.raises(ValueError, match="Missing required column"):
+            laspeyres(SYNTH_UNWEIGHTED)
 
     def test_zero_quantity(self):
         df = pl.DataFrame(
             {
-                "date": ["2023-01-01", "2023-02-01"],
+                "period": ["2023-01-01", "2023-02-01"],
                 "product_id": ["A", "A"],
-                "price": [100.0, 110.0],
-                "quantity": [0, 10],
+                "aggregated_price": [100.0, 110.0],
+                "aggregated_quantity": [0, 10],
             }
         )
         with pytest.raises(ValueError, match="All quantities must be positive"):
@@ -456,10 +625,10 @@ class TestValidation:
     def test_negative_quantity(self):
         df = pl.DataFrame(
             {
-                "date": ["2023-01-01", "2023-02-01"],
+                "period": ["2023-01-01", "2023-02-01"],
                 "product_id": ["A", "A"],
-                "price": [100.0, 110.0],
-                "quantity": [-10, 10],
+                "aggregated_price": [100.0, 110.0],
+                "aggregated_quantity": [-10, 10],
             }
         )
         with pytest.raises(ValueError, match="All quantities must be positive"):
@@ -468,7 +637,7 @@ class TestValidation:
     def test_multiple_prices_per_product_period(self):
         df = pl.DataFrame(
             {
-                "date": [
+                "period": [
                     "2023-01-01",
                     "2023-01-01",
                     "2023-01-01",
@@ -477,7 +646,7 @@ class TestValidation:
                     "2023-02-01",
                 ],
                 "product_id": ["A", "A", "B", "A", "A", "B"],
-                "price": [100.0, 105.0, 200.0, 110.0, 115.0, 190.0],
+                "aggregated_price": [100.0, 105.0, 200.0, 110.0, 115.0, 190.0],
             }
         )
         with pytest.raises(ValueError, match="exactly one price per period"):

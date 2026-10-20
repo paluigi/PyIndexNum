@@ -3,15 +3,35 @@ Multilateral price index functions for the PyIndexNum library.
 
 This module contains functions for calculating multilateral price indices
 that compare prices across multiple time periods simultaneously.
+
+All functions accept a DataFrame in the canonical panel schema produced by
+``aggregate_time``: columns "product_id", "period", "aggregated_price" and
+(for weighted methods) "aggregated_quantity". Custom column names can be
+passed via the ``period_col``/``price_col``/``id_col``/``quantity_col``
+arguments. The GEKS and Geary-Khamis methods require a balanced panel by
+default (``balanced=True``); pass ``balanced=False`` to compute each period
+comparison on the products matched between the periods involved instead.
+The time-product-dummy method is regression-based and naturally handles
+unbalanced panels without any flag.
 """
 
-import polars as pl
+import warnings
+
 import numpy as np
-from typing import Optional
-from .bilateral import fisher, tornqvist, jevons
+import polars as pl
+
+from .bilateral import _to_canonical, fisher, jevons, tornqvist
 
 
-def geks_fisher(df: pl.DataFrame) -> pl.DataFrame:
+def geks_fisher(
+    df: pl.DataFrame,
+    period_col: str = "period",
+    price_col: str = "aggregated_price",
+    id_col: str = "product_id",
+    quantity_col: str = "aggregated_quantity",
+    balanced: bool = True,
+    panel_warnings: bool = False,
+) -> pl.DataFrame:
     """
     Compute the GEKS-Fisher multilateral price index.
 
@@ -22,13 +42,23 @@ def geks_fisher(df: pl.DataFrame) -> pl.DataFrame:
     Formula: P_geks_t = product_{k=1}^T [P_F(p^k, p^t, q^k, q^t) / P_F(p^k, p^1, q^k, q^1)]^(1/T)
 
     Args:
-        df: Polars DataFrame with standardized columns ("product_id", "period",
-            "aggregated_price", "aggregated_quantity") containing data for
-            multiple periods, with each product having exactly one price
-            and quantity per period.
+        df: Polars DataFrame with the panel columns identified by period_col,
+            price_col, id_col and quantity_col, containing data for multiple
+            periods, with each product having exactly one price and quantity
+            per period.
+        period_col: Name of the period column (default "period").
+        price_col: Name of the price column (default "aggregated_price").
+        id_col: Name of the product identifier column (default "product_id").
+        quantity_col: Name of the quantity column (default "aggregated_quantity").
+        balanced: If True (default), require every product to be present in
+            every period. If False, each bilateral link is computed on the
+            products matched between the two periods involved, and the GEKS
+            average for a period runs over the available links.
+        panel_warnings: If True, emit a UserWarning summarising unmatched
+            products and skipped period pairs when balanced=False.
 
     Returns:
-        DataFrame with columns "period" (Date) and "index_value" (float),
+        DataFrame with columns "period" and "index_value" (float),
         where index_value represents the multilateral price index for each period
         relative to the base period (first chronological period = 1.0).
 
@@ -36,20 +66,30 @@ def geks_fisher(df: pl.DataFrame) -> pl.DataFrame:
         ValueError: If DataFrame doesn't meet requirements (see _validate_multilateral_input).
 
     Examples:
+        >>> from datetime import date
         >>> import polars as pl
         >>> df = pl.DataFrame({
         ...     "product_id": ["A", "A", "B", "B"],
-        ...     "period": [pl.date(2023, 1, 1), pl.date(2023, 2, 1), pl.date(2023, 1, 1), pl.date(2023, 2, 1)],
+        ...     "period": [date(2023, 1, 1), date(2023, 2, 1), date(2023, 1, 1), date(2023, 2, 1)],
         ...     "aggregated_price": [100, 110, 200, 210],
         ...     "aggregated_quantity": [10, 10, 20, 20]
         ... })
         >>> result = geks_fisher(df)
         >>> # Returns DataFrame with period and index_value columns
     """
-    return _geks_base(df, fisher)
+    df = _to_canonical(df, period_col, price_col, id_col, quantity_col)
+    return _geks_base(df, fisher, weighted=True, balanced=balanced, panel_warnings=panel_warnings)
 
 
-def geks_tornqvist(df: pl.DataFrame) -> pl.DataFrame:
+def geks_tornqvist(
+    df: pl.DataFrame,
+    period_col: str = "period",
+    price_col: str = "aggregated_price",
+    id_col: str = "product_id",
+    quantity_col: str = "aggregated_quantity",
+    balanced: bool = True,
+    panel_warnings: bool = False,
+) -> pl.DataFrame:
     """
     Compute the GEKS-Törnqvist (CCDI) multilateral price index.
 
@@ -59,13 +99,23 @@ def geks_tornqvist(df: pl.DataFrame) -> pl.DataFrame:
     Formula: P_ccdi_t = product_{k=1}^T [P_T(p^k, p^t, s^k, s^t) / P_T(p^k, p^1, s^k, s^1)]^(1/T)
 
     Args:
-        df: Polars DataFrame with standardized columns ("product_id", "period",
-            "aggregated_price", "aggregated_quantity") containing data for
-            multiple periods, with each product having exactly one price
-            and quantity per period.
+        df: Polars DataFrame with the panel columns identified by period_col,
+            price_col, id_col and quantity_col, containing data for multiple
+            periods, with each product having exactly one price and quantity
+            per period.
+        period_col: Name of the period column (default "period").
+        price_col: Name of the price column (default "aggregated_price").
+        id_col: Name of the product identifier column (default "product_id").
+        quantity_col: Name of the quantity column (default "aggregated_quantity").
+        balanced: If True (default), require every product to be present in
+            every period. If False, each bilateral link is computed on the
+            products matched between the two periods involved, and the GEKS
+            average for a period runs over the available links.
+        panel_warnings: If True, emit a UserWarning summarising unmatched
+            products and skipped period pairs when balanced=False.
 
     Returns:
-        DataFrame with columns "period" (Date) and "index_value" (float),
+        DataFrame with columns "period" and "index_value" (float),
         where index_value represents the multilateral price index for each period
         relative to the base period (first chronological period = 1.0).
 
@@ -73,20 +123,29 @@ def geks_tornqvist(df: pl.DataFrame) -> pl.DataFrame:
         ValueError: If DataFrame doesn't meet requirements (see _validate_multilateral_input).
 
     Examples:
+        >>> from datetime import date
         >>> import polars as pl
         >>> df = pl.DataFrame({
         ...     "product_id": ["A", "A", "B", "B"],
-        ...     "period": [pl.date(2023, 1, 1), pl.date(2023, 2, 1), pl.date(2023, 1, 1), pl.date(2023, 2, 1)],
+        ...     "period": [date(2023, 1, 1), date(2023, 2, 1), date(2023, 1, 1), date(2023, 2, 1)],
         ...     "aggregated_price": [100, 110, 200, 210],
         ...     "aggregated_quantity": [10, 10, 20, 20]
         ... })
         >>> result = geks_tornqvist(df)
         >>> # Returns DataFrame with period and index_value columns
     """
-    return _geks_base(df, tornqvist)
+    df = _to_canonical(df, period_col, price_col, id_col, quantity_col)
+    return _geks_base(df, tornqvist, weighted=True, balanced=balanced, panel_warnings=panel_warnings)
 
 
-def geks_jevons(df: pl.DataFrame) -> pl.DataFrame:
+def geks_jevons(
+    df: pl.DataFrame,
+    period_col: str = "period",
+    price_col: str = "aggregated_price",
+    id_col: str = "product_id",
+    balanced: bool = True,
+    panel_warnings: bool = False,
+) -> pl.DataFrame:
     """
     Compute the GEKS-Jevons multilateral price index.
 
@@ -105,14 +164,22 @@ def geks_jevons(df: pl.DataFrame) -> pl.DataFrame:
     to outperform some weighted bilateral methods in empirical studies.
 
     Args:
-        df: Polars DataFrame with columns ("product_id", "period",
-            "aggregated_price") containing data for multiple periods,
-            with each product having exactly one price per period.
-            The "aggregated_quantity" column is optional and, if present,
-            will be ignored (Jevons is an unweighted index).
+        df: Polars DataFrame with the panel columns identified by period_col,
+            price_col and id_col, containing data for multiple periods, with
+            each product having exactly one price per period. A quantity
+            column, if present, is ignored (Jevons is an unweighted index).
+        period_col: Name of the period column (default "period").
+        price_col: Name of the price column (default "aggregated_price").
+        id_col: Name of the product identifier column (default "product_id").
+        balanced: If True (default), require every product to be present in
+            every period. If False, each bilateral link is computed on the
+            products matched between the two periods involved, and the GEKS
+            average for a period runs over the available links.
+        panel_warnings: If True, emit a UserWarning summarising unmatched
+            products and skipped period pairs when balanced=False.
 
     Returns:
-        DataFrame with columns "period" (Date) and "index_value" (float),
+        DataFrame with columns "period" and "index_value" (float),
         where index_value represents the multilateral price index for each period
         relative to the base period (first chronological period = 1.0).
 
@@ -120,28 +187,40 @@ def geks_jevons(df: pl.DataFrame) -> pl.DataFrame:
         ValueError: If DataFrame doesn't meet requirements (see _validate_multilateral_input).
 
     Examples:
+        >>> from datetime import date
         >>> import polars as pl
         >>> df = pl.DataFrame({
         ...     "product_id": ["A", "A", "B", "B"],
-        ...     "period": [pl.date(2023, 1, 1), pl.date(2023, 2, 1), pl.date(2023, 1, 1), pl.date(2023, 2, 1)],
+        ...     "period": [date(2023, 1, 1), date(2023, 2, 1), date(2023, 1, 1), date(2023, 2, 1)],
         ...     "aggregated_price": [100, 110, 200, 210],
         ... })
         >>> result = geks_jevons(df)
         >>> # Returns DataFrame with period and index_value columns
     """
-    return _geks_base(df, jevons, weighted=False)
+    df = _to_canonical(df, period_col, price_col, id_col)
+    return _geks_base(df, jevons, weighted=False, balanced=balanced, panel_warnings=panel_warnings)
 
 
-def _geks_base(df: pl.DataFrame, bilateral_func, weighted: bool = True) -> pl.DataFrame:
+def _geks_base(
+    df: pl.DataFrame,
+    bilateral_func,
+    weighted: bool = True,
+    balanced: bool = True,
+    panel_warnings: bool = False,
+) -> pl.DataFrame:
     """Helper for GEKS indices computation.
 
     Args:
-        df: Input DataFrame.
+        df: Input DataFrame in canonical panel schema.
         bilateral_func: Bilateral index function to use (e.g., fisher, jevons).
         weighted: If True, require aggregated_quantity column. If False, only
             require aggregated_price (suitable for unweighted indices like Jevons).
+        balanced: If True, require a complete panel. If False, compute each
+            bilateral link on the matched products of the pair involved.
+        panel_warnings: If True and balanced=False, emit one summary warning
+            about unmatched products and skipped pairs.
     """
-    _validate_multilateral_input(df, weighted)
+    _validate_multilateral_input(df, weighted, balanced=balanced)
 
     has_quantity = "aggregated_quantity" in df.columns
 
@@ -151,107 +230,158 @@ def _geks_base(df: pl.DataFrame, bilateral_func, weighted: bool = True) -> pl.Da
     if T < 2:
         raise ValueError("GEKS requires at least 2 periods")
 
-    # Pre-calculate all bilateral indices P(k, t)
-    # Store in a matrix-like dictionary for easy access
-    bilateral_matrix = {}
-    for i, period_i in enumerate(periods):
-        for j, period_j in enumerate(periods):
-            if i == j:
-                bilateral_matrix[(i, j)] = 1.0
+    # Product set observed in each period, for per-pair matching
+    product_sets = {
+        period: set(
+            df.filter(pl.col("period") == period).select("product_id").to_series().to_list()
+        )
+        for period in periods
+    }
+
+    pair_cols = ["product_id", "period", "aggregated_price"]
+    if has_quantity:
+        pair_cols.append("aggregated_quantity")
+
+    # Pre-calculate all bilateral indices P(i, j) for i < j (price in j
+    # relative to i), stored symmetrically. Pairs with no common products
+    # are stored as None and skipped in the final average.
+    bilateral_matrix = {(i, i): 1.0 for i in range(T)}
+    unmatched_pairs = []
+    skipped_pairs = []
+
+    for i in range(T):
+        for j in range(i + 1, T):
+            common = product_sets[periods[i]] & product_sets[periods[j]]
+            if not common:
+                bilateral_matrix[(i, j)] = None
+                bilateral_matrix[(j, i)] = None
+                skipped_pairs.append((periods[i], periods[j]))
                 continue
-            
-            # Filter data for the two periods
-            df_i = df.filter(pl.col("period") == period_i)
-            df_j = df.filter(pl.col("period") == period_j)
 
-            # Important: Ensure periods are in chronological order for the bilateral function
-            # The bilateral functions expect first date as base, second as current.
-            if i < j:
-                base_p, curr_p = period_i, period_j
-                base_df, curr_df = df_i, df_j
-            else:
-                base_p, curr_p = period_j, period_i
-                base_df, curr_df = df_j, df_i
+            # Chronological order is guaranteed by i < j: period i is the
+            # base of the bilateral comparison. The bilateral call itself
+            # matches products on the common set (balanced=False); with a
+            # complete panel the two modes coincide.
+            pair_df = pl.concat([
+                df.filter(pl.col("period") == periods[i]).select(pair_cols),
+                df.filter(pl.col("period") == periods[j]).select(pair_cols),
+            ])
+            idx = bilateral_func(pair_df, balanced=False, panel_warnings=False)
+            bilateral_matrix[(i, j)] = idx
+            bilateral_matrix[(j, i)] = 1.0 / idx
 
-            # Create bilateral dataframe format expected by bilateral functions
-            if has_quantity:
-                bilateral_df = pl.concat([
-                    base_df.select(["product_id", "aggregated_price", "aggregated_quantity"])
-                        .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
-                        .with_columns(pl.lit(base_p).alias("date")),
-                    curr_df.select(["product_id", "aggregated_price", "aggregated_quantity"])
-                        .rename({"aggregated_price": "price", "aggregated_quantity": "quantity"})
-                        .with_columns(pl.lit(curr_p).alias("date"))
-                ])
-            else:
-                bilateral_df = pl.concat([
-                    base_df.select(["product_id", "aggregated_price"])
-                        .rename({"aggregated_price": "price"})
-                        .with_columns(pl.lit(base_p).alias("date")),
-                    curr_df.select(["product_id", "aggregated_price"])
-                        .rename({"aggregated_price": "price"})
-                        .with_columns(pl.lit(curr_p).alias("date"))
-                ])
+            n_unmatched = len(product_sets[periods[i]] ^ product_sets[periods[j]])
+            if n_unmatched:
+                unmatched_pairs.append((periods[i], periods[j], n_unmatched))
 
-            try:
-                # Calculate bilateral index
-                idx = bilateral_func(bilateral_df)
-                
-                # If i > j, we need the inverse because bilateral_func(bilateral_df) 
-                # calculated P(j, i) but we want P(i, j)
-                if i < j:
-                    bilateral_matrix[(i, j)] = idx
-                else:
-                    bilateral_matrix[(i, j)] = 1.0 / idx
-            except ValueError:
-                # In GEKS, we should ideally have a complete graph, 
-                # but if data is missing, this is a simplified version.
-                # Here we assume full overlap for simplicity as per requirements.
-                raise
+    if panel_warnings and (unmatched_pairs or skipped_pairs):
+        parts = []
+        if unmatched_pairs:
+            total_unmatched = sum(n for _, _, n in unmatched_pairs)
+            parts.append(
+                f"{len(unmatched_pairs)} of {T * (T - 1) // 2} period pairs have unmatched "
+                f"products ({total_unmatched} unmatched product occurrences in total); "
+                "each link uses the products matched between its two periods"
+            )
+        if skipped_pairs:
+            formatted = ", ".join(f"{p} vs {q}" for p, q in skipped_pairs)
+            parts.append(f"period pairs with no common products were skipped: {formatted}")
+        warnings.warn(
+            "Unbalanced panel: " + "; ".join(parts) + ".",
+            UserWarning,
+        )
 
     # Compute GEKS: P_geks_t = product_{k=0}^{T-1} [P(k, t) / P(k, 0)]^(1/T)
-    # This is equivalent to linking period t to period 0 via all intermediate periods k
+    # This is equivalent to linking period t to period 0 via all intermediate periods k.
+    # With an unbalanced panel, links whose pair has no common products are
+    # skipped and the average runs over the available links only.
     indices = []
     for t in range(T):
         log_sum = 0.0
+        n_links = 0
         for k in range(T):
             # log(P(k, t) / P(k, 0))
             # Note: bilateral_matrix stores P(i, j) = Price in j relative to i
             # So P(k, t) is price in t relative to k
             # P(k, 0) is price in 0 relative to k
             # P(k, t) / P(k, 0) is the link from 0 to t via k
-            log_sum += np.log(bilateral_matrix[(k, t)] / bilateral_matrix[(k, 0)])
-        
-        geks_t = np.exp(log_sum / T)
+            p_kt = bilateral_matrix.get((k, t))
+            p_k0 = bilateral_matrix.get((k, 0))
+            if p_kt is None or p_k0 is None:
+                continue
+            log_sum += np.log(p_kt / p_k0)
+            n_links += 1
+
+        if n_links == 0:
+            raise ValueError(
+                f"No common products between period {periods[t]} and any other period; "
+                "cannot compute GEKS index"
+            )
+
+        geks_t = np.exp(log_sum / n_links)
         indices.append({"period": periods[t], "index_value": geks_t})
 
     return pl.DataFrame(indices)
 
 
-def geary_khamis(df: pl.DataFrame, max_iter: int = 100, tol: float = 1e-8) -> pl.DataFrame:
+def geary_khamis(
+    df: pl.DataFrame,
+    max_iter: int = 100,
+    tol: float = 1e-8,
+    period_col: str = "period",
+    price_col: str = "aggregated_price",
+    id_col: str = "product_id",
+    quantity_col: str = "aggregated_quantity",
+    balanced: bool = True,
+    panel_warnings: bool = False,
+) -> pl.DataFrame:
     """
     Compute the Geary-Khamis multilateral price index.
 
     The Geary-Khamis method is an iterative multilateral index that solves
     for reference prices and period price levels simultaneously.
 
+    With ``balanced=False``, missing (product, period) combinations are
+    excluded from the reference-price and price-level sums (the iteration
+    runs over observed cells only). Convergence is well-defined for complete
+    panels; for strongly unbalanced panels it is not theoretically guaranteed,
+    so ``max_iter`` and ``tol`` remain available as safeguards.
+
     Args:
-        df: Polars DataFrame with standardized columns ("product_id", "period",
-            "aggregated_price", "aggregated_quantity") containing data for
-            multiple periods, with each product having exactly one price
-            and quantity per period.
+        df: Polars DataFrame with the panel columns identified by period_col,
+            price_col, id_col and quantity_col, containing data for multiple
+            periods, with each product having exactly one price and quantity
+            per period.
         max_iter: Maximum number of iterations for convergence (default 100).
         tol: Tolerance for convergence check (default 1e-8).
+        period_col: Name of the period column (default "period").
+        price_col: Name of the price column (default "aggregated_price").
+        id_col: Name of the product identifier column (default "product_id").
+        quantity_col: Name of the quantity column (default "aggregated_quantity").
+        balanced: If True (default), require every product to be present in
+            every period. If False, run the iteration over observed cells.
+        panel_warnings: If True, emit a UserWarning when the panel is
+            unbalanced and balanced=False.
 
     Returns:
-        DataFrame with columns "period" (Date) and "index_value" (float),
+        DataFrame with columns "period" and "index_value" (float),
         where index_value represents the multilateral price index for each period
         relative to the base period (first chronological period = 1.0).
 
     Raises:
         ValueError: If DataFrame doesn't meet requirements or iteration doesn't converge.
     """
-    _validate_multilateral_input(df)
+    df = _to_canonical(df, period_col, price_col, id_col, quantity_col)
+    _validate_multilateral_input(df, weighted=True, balanced=balanced)
+
+    if panel_warnings and not balanced:
+        n_unbalanced = _count_unbalanced_products(df)
+        if n_unbalanced:
+            warnings.warn(
+                f"Unbalanced panel: {n_unbalanced} product(s) are not present in all periods; "
+                "the Geary-Khamis iteration runs over observed cells only.",
+                UserWarning,
+            )
 
     periods = df.select("period").unique().sort("period").to_series().to_list()
     products = df.select("product_id").unique().to_series().to_list()
@@ -262,11 +392,12 @@ def geary_khamis(df: pl.DataFrame, max_iter: int = 100, tol: float = 1e-8) -> pl
     # Rows: periods, Cols: products
     pivot_price = df.pivot(index="period", on="product_id", values="aggregated_price").sort("period")
     pivot_qty = df.pivot(index="period", on="product_id", values="aggregated_quantity").sort("period")
-    
-    # Fill nulls if any (though validation should catch this)
+
+    # Missing (product, period) combinations pivot to null -> NaN, which the
+    # masked (nansum) iteration below treats as unobserved cells
     product_cols = [str(p) for p in products]
-    P = pivot_price.select(product_cols).to_numpy()
-    Q = pivot_qty.select(product_cols).to_numpy()
+    P = pivot_price.select(product_cols).to_numpy().astype(float)
+    Q = pivot_qty.select(product_cols).to_numpy().astype(float)
 
     # Initialize price levels P_GK^t = 1 for all t
     price_levels = np.ones(T)
@@ -276,14 +407,16 @@ def geary_khamis(df: pl.DataFrame, max_iter: int = 100, tol: float = 1e-8) -> pl
 
         # 1. Calculate Reference Prices (alpha_n)
         # alpha_n = [sum_t (q_n^t * p_n^t / P_GK^t)] / [sum_t q_n^t]
-        numerator_alpha = np.sum((Q * P) / price_levels[:, np.newaxis], axis=0)
-        denominator_alpha = np.sum(Q, axis=0)
+        # (sums over the periods where product n is observed)
+        numerator_alpha = np.nansum((Q * P) / price_levels[:, np.newaxis], axis=0)
+        denominator_alpha = np.nansum(Q, axis=0)
         alpha = numerator_alpha / denominator_alpha
 
         # 2. Update Period Price Levels (P_GK^t)
         # P_GK^t = [sum_n p_n^t * q_n^t] / [sum_n alpha_n * q_n^t]
-        numerator_P = np.sum(P * Q, axis=1)
-        denominator_P = np.sum(alpha * Q, axis=1)
+        # (sums over the products observed in period t)
+        numerator_P = np.nansum(P * Q, axis=1)
+        denominator_P = np.nansum(alpha * Q, axis=1)
         price_levels = numerator_P / denominator_P
 
         # Normalize price_levels to make the system stable (e.g., first period = 1)
@@ -306,7 +439,14 @@ def geary_khamis(df: pl.DataFrame, max_iter: int = 100, tol: float = 1e-8) -> pl
     return pl.DataFrame(indices)
 
 
-def time_product_dummy(df: pl.DataFrame, weighted: bool = True) -> pl.DataFrame:
+def time_product_dummy(
+    df: pl.DataFrame,
+    weighted: bool = True,
+    period_col: str = "period",
+    price_col: str = "aggregated_price",
+    id_col: str = "product_id",
+    quantity_col: str = "aggregated_quantity",
+) -> pl.DataFrame:
     """
     Compute the Time Product Dummy multilateral price index.
 
@@ -314,18 +454,32 @@ def time_product_dummy(df: pl.DataFrame, weighted: bool = True) -> pl.DataFrame:
     price indices. Time and product dummy variables are included in the model,
     with the index values derived from the time dummy coefficients.
 
+    The estimation is row-based (one row per observed product-period
+    combination), so the method naturally handles unbalanced panels without
+    imputation or product matching; expenditure-share weights are
+    re-normalised within each period's observed products.
+
+    Note:
+        Products observed in only one period have their dummy variables
+        collinear with the time dummies; the least-squares solver resolves
+        this silently with a minimum-norm solution. Consider removing such
+        products for cleaner estimates.
+
     Args:
-        df: Polars DataFrame with standardized columns ("product_id", "period",
-            "aggregated_price") and optionally "aggregated_quantity" if weighted=True.
-            Contains data for multiple periods, with each product having exactly
-            one price per period.
+        df: Polars DataFrame with the panel columns identified by period_col,
+            price_col, id_col (and quantity_col if weighted=True), containing
+            data for multiple periods, with each product having exactly one
+            price per period.
         weighted: If True, use weighted least squares with expenditure shares
                  (p*q / sum(p*q) per period) as weights. This requires the
-                 "aggregated_quantity" column to be present. If False, use
-                 unweighted OLS.
+                 quantity column to be present. If False, use unweighted OLS.
+        period_col: Name of the period column (default "period").
+        price_col: Name of the price column (default "aggregated_price").
+        id_col: Name of the product identifier column (default "product_id").
+        quantity_col: Name of the quantity column (default "aggregated_quantity").
 
     Returns:
-        DataFrame with columns "period" (Date) and "index_value" (float),
+        DataFrame with columns "period" and "index_value" (float),
         where index_value represents the multilateral price index for each period
         relative to the base period (first chronological period = 1.0).
 
@@ -333,17 +487,19 @@ def time_product_dummy(df: pl.DataFrame, weighted: bool = True) -> pl.DataFrame:
         ValueError: If DataFrame doesn't meet requirements.
 
     Examples:
+        >>> from datetime import date
         >>> import polars as pl
         >>> df = pl.DataFrame({
         ...     "product_id": ["A", "A", "B", "B"],
-        ...     "period": [pl.date(2023, 1, 1), pl.date(2023, 2, 1), pl.date(2023, 1, 1), pl.date(2023, 2, 1)],
+        ...     "period": [date(2023, 1, 1), date(2023, 2, 1), date(2023, 1, 1), date(2023, 2, 1)],
         ...     "aggregated_price": [100, 110, 200, 210],
         ...     "aggregated_quantity": [10, 10, 20, 20]
         ... })
         >>> result = time_product_dummy(df, weighted=True)
         >>> # Returns DataFrame with period and index_value columns
     """
-    _validate_multilateral_input(df, weighted)
+    df = _to_canonical(df, period_col, price_col, id_col, quantity_col if weighted else None)
+    _validate_multilateral_input(df, weighted, balanced=False)
 
     periods = df.select("period").unique().sort("period").to_series().to_list()
     products = df.select("product_id").unique().to_series().to_list()
@@ -427,13 +583,36 @@ def time_product_dummy(df: pl.DataFrame, weighted: bool = True) -> pl.DataFrame:
     return pl.DataFrame(indices)
 
 
-def _validate_multilateral_input(df: pl.DataFrame, weighted: bool = True) -> None:
+def _count_unbalanced_products(df: pl.DataFrame) -> int:
+    """
+    Count products that are not observed in every period.
+
+    Args:
+        df: Canonical DataFrame with columns "product_id" and "period".
+
+    Returns:
+        Number of products missing from at least one period.
+    """
+    total_periods = df.select("period").unique().height
+    product_period_counts = df.group_by("product_id").agg(
+        pl.col("period").n_unique().alias("period_count")
+    )
+    return product_period_counts.filter(pl.col("period_count") < total_periods).height
+
+
+def _validate_multilateral_input(
+    df: pl.DataFrame,
+    weighted: bool = True,
+    balanced: bool = True,
+) -> None:
     """
     Validate DataFrame for multilateral index computation.
 
     Args:
-        df: DataFrame to validate
+        df: Canonical DataFrame to validate.
         weighted: Whether weighted regression is requested, default True
+        balanced: If True (default), require every product to be present in
+            every period. If False, unbalanced panels are accepted.
 
     Raises:
         ValueError: If validation fails
@@ -471,6 +650,16 @@ def _validate_multilateral_input(df: pl.DataFrame, weighted: bool = True) -> Non
     n_products = df.select("product_id").unique().height
     if n_products < 2:
         raise ValueError("Multilateral indices require at least 2 products")
+
+    # Check the panel is complete when a balanced panel is required
+    if balanced:
+        n_unbalanced = _count_unbalanced_products(df)
+        if n_unbalanced:
+            raise ValueError(
+                f"Panel is not balanced: {n_unbalanced} product(s) are not present in all periods. "
+                "Pass balanced=False to compute the index on matched product sets, "
+                "or use remove_unbalanced()/carry_forward_imputation() first."
+            )
 
     # Additional checks for weighted indices
     if weighted:

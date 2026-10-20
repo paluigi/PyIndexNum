@@ -82,9 +82,10 @@ Aggregate the high-frequency data to monthly periods:
 ```python
 df_agg = pin.aggregate_time(
     df_std,
+    quantity_col="quantity",
     freq="1mo",
-    agg_type="arithmetic"  # Arithmetic mean for prices
-)
+    agg_type="arithmetic"  # Arithmetic mean for prices; quantities are summed
+).sort("product_id", "period")
 print(df_agg)
 ```
 
@@ -94,18 +95,18 @@ shape: (9, 4)
 ┌────────────┬────────────┬───────────────────┬─────────────────────┐
 │ product_id ┆ period     ┆ aggregated_price  ┆ aggregated_quantity │
 │ ---        ┆ ---        ┆ ---               ┆ ---                 │
-│ str        ┆ date       ┆ f64               ┆ f64                 │
+│ str        ┆ date       ┆ f64               ┆ i64                 │
 ╞════════════╪════════════╪═══════════════════╪═════════════════════╡
-│ A          ┆ 2023-01-01 ┆ 102.5             ┆ 11.0                │
-│ A          ┆ 2023-02-01 ┆ 109.0             ┆ 12.0                │
-│ A          ┆ 2023-03-01 ┆ 115.0             ┆ 10.0                │
-│ B          ┆ 2023-01-01 ┆ 197.5             ┆ 5.5                 │
-│ B          ┆ 2023-02-01 ┆ 207.5             ┆ 5.5                 │
-│ B          ┆ 2023-03-01 ┆ 220.0             ┆ 5.0                 │
-│ C          ┆ 2023-01-01 ┆ 51.0              ┆ 19.0                │
-│ C          ┆ 2023-02-01 ┆ 49.5              ┆ 20.5                │
-│ C          ┆ 2023-03-01 ┆ 49.0              ┆ 21.0                │
-└────────────┴────────────┴────────────┴─────────────────────┘
+│ A          ┆ 2023-01-01 ┆ 102.5             ┆ 22                  │
+│ A          ┆ 2023-02-01 ┆ 109.0             ┆ 24                  │
+│ A          ┆ 2023-03-01 ┆ 115.0             ┆ 10                  │
+│ B          ┆ 2023-01-01 ┆ 197.5             ┆ 11                  │
+│ B          ┆ 2023-02-01 ┆ 207.5             ┆ 11                  │
+│ B          ┆ 2023-03-01 ┆ 220.0             ┆ 5                   │
+│ C          ┆ 2023-01-01 ┆ 51.0              ┆ 38                  │
+│ C          ┆ 2023-02-01 ┆ 49.5              ┆ 41                  │
+│ C          ┆ 2023-03-01 ┆ 49.0              ┆ 21                  │
+└────────────┴────────────┴───────────────────┴─────────────────────┘
 ```
 
 ## Step 3: Handle Unbalanced Data (Optional)
@@ -130,11 +131,13 @@ df_imputed = pin.carry_forward_imputation(
 Calculate indices comparing two specific periods. Let's compare January to February:
 
 ```python
+from datetime import date
+
 # Filter to January and February data
 df_two_periods = df_agg.filter(
     pl.col("period").is_in([
-        pl.date(2023, 1, 1),
-        pl.date(2023, 2, 1)
+        date(2023, 1, 1),
+        date(2023, 2, 1)
     ])
 )
 
@@ -152,11 +155,17 @@ print(f"Törnqvist Index: {tornqvist_idx:.4f}")
 
 Output:
 ```
-Laspeyres Index: 1.0507
-Paasche Index: 1.0511
-Fisher Index: 1.0509
-Törnqvist Index: 1.0509
+Laspeyres Index: 1.0308
+Paasche Index: 1.0304
+Fisher Index: 1.0306
+Törnqvist Index: 1.0306
 ```
+
+The aggregated panel feeds every index function directly — no renaming needed.
+If your periods carry unmatched products, add `balanced=False` to compute on
+the matched product set instead of balancing or imputing first, and data with
+different column names can be passed via `period_col`/`price_col`/`id_col`/
+`quantity_col`.
 
 ## Step 5: Calculate Multilateral Indices (Optional)
 

@@ -293,23 +293,29 @@ def aggregate_time(
     return result
 
 
-def remove_unbalanced(df: pl.DataFrame) -> pl.DataFrame:
+def remove_unbalanced(
+    df: pl.DataFrame,
+    id_col: str = "product_id",
+    period_col: str = "period"
+) -> pl.DataFrame:
     """
     Remove products that are not present in all time periods.
 
-    This function filters out any product_id that does not appear in every
+    This function filters out any product that does not appear in every
     unique time period in the dataset, resulting in a balanced panel dataset.
     It assumes the DataFrame has been processed by standardize_columns and
-    aggregate_time, with columns "product_id" and "period".
+    aggregate_time, with the columns identified by id_col and period_col.
 
     Args:
-        df: Polars DataFrame with columns "product_id" and "period" (from aggregate_time).
+        df: Polars DataFrame with the panel columns (from aggregate_time).
+        id_col: Name of the product identifier column (default "product_id").
+        period_col: Name of the period column (default "period").
 
     Returns:
         Filtered DataFrame containing only products present in all periods.
 
     Raises:
-        ValueError: If required columns "product_id" or "period" are missing.
+        ValueError: If required columns are missing.
 
     Examples:
         >>> df = pl.DataFrame({
@@ -321,34 +327,39 @@ def remove_unbalanced(df: pl.DataFrame) -> pl.DataFrame:
         >>> # Only product "C" is removed as it's missing period 2023-02-01
     """
     # Validate required columns
-    required_cols = ["product_id", "period"]
+    required_cols = [id_col, period_col]
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         raise ValueError(f"Missing required columns: {missing_cols}")
 
     # Get total number of unique periods
-    total_periods = df.select("period").unique().height
+    total_periods = df.select(period_col).unique().height
 
     # Count periods per product
     product_period_counts = (
-        df.group_by("product_id")
-        .agg(pl.col("period").n_unique().alias("period_count"))
+        df.group_by(id_col)
+        .agg(pl.col(period_col).n_unique().alias("period_count"))
     )
 
     # Get balanced products (present in all periods)
     balanced_product_list = (
         product_period_counts
         .filter(pl.col("period_count") == total_periods)
-        .select("product_id")
+        .select(id_col)
         .to_series()
         .to_list()
     )
 
     # Filter original DataFrame
-    return df.filter(pl.col("product_id").is_in(balanced_product_list))
+    return df.filter(pl.col(id_col).is_in(balanced_product_list))
 
 
-def get_summary(df: pl.DataFrame) -> dict:
+def get_summary(
+    df: pl.DataFrame,
+    id_col: str = "product_id",
+    date_col: str = "date",
+    quantity_col: str = "quantity"
+) -> dict:
     """
     Get summary information about a standardized price index DataFrame.
 
@@ -356,7 +367,10 @@ def get_summary(df: pl.DataFrame) -> dict:
     standardized using standardize_columns().
 
     Args:
-        df: Polars DataFrame with standardized columns (date, price, product_id, quantity).
+        df: Polars DataFrame with standardized columns.
+        id_col: Name of the product identifier column (default "product_id").
+        date_col: Name of the date column (default "date").
+        quantity_col: Name of the quantity column (default "quantity").
 
     Returns:
         Dictionary containing:
@@ -365,10 +379,13 @@ def get_summary(df: pl.DataFrame) -> dict:
         - end_date: Latest date in the data
         - quantity: Boolean indicating if quantity column exists and has non-null values
     """
-    n_products = df.select("product_id").unique().height
-    start_date = df.select(pl.col("date").min()).item()
-    end_date = df.select(pl.col("date").max()).item()
-    quantity_present = "quantity" in df.columns and df.select(pl.col("quantity").is_not_null().any()).item()
+    n_products = df.select(id_col).unique().height
+    start_date = df.select(pl.col(date_col).min()).item()
+    end_date = df.select(pl.col(date_col).max()).item()
+    quantity_present = (
+        quantity_col in df.columns
+        and df.select(pl.col(quantity_col).is_not_null().any()).item()
+    )
 
     return {
         "n_products": n_products,

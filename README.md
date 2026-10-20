@@ -12,9 +12,26 @@ A high-performance Python library for calculating economic index numbers using P
 - **High Performance**: Built on Polars for efficient data processing of large datasets
 - **Comprehensive Index Methods**: Support for bilateral and multilateral price/quantity indices
 - **Data Preparation Tools**: Built-in utilities for data standardization and temporal aggregation
-- **Panel Data Handling**: Robust methods for dealing with unbalanced panels through removal or imputation
+- **Flexible Input**: Every index function consumes `aggregate_time` output directly, and accepts custom column names for pre-aggregated external data
+- **Unbalanced Panels**: Matched-sample computation (`balanced=False`) across bilateral and multilateral indices — no imputation or product removal required
 - **Extension Methods**: Support for index splicing and rolling window calculations
 - **Type Safety**: Full type annotations for better IDE support and code reliability
+
+## What's new in 0.4.0
+
+**Breaking change — one unified input schema.** All index functions (bilateral and multilateral) now consume the panel schema produced by `aggregate_time`: `product_id`, `period`, `aggregated_price`, `aggregated_quantity`. The output of `aggregate_time` feeds every index function directly, with no renaming. Bilateral functions previously required `date`/`price`/`quantity` columns; existing code migrates in one line:
+
+```python
+# before 0.4.0                        # 0.4.0
+laspeyres(df)                         laspeyres(df, period_col="date", price_col="price",
+                                               quantity_col="quantity")
+```
+
+New features:
+
+- **Custom column names** on every index function (`period_col`, `price_col`, `id_col`, `quantity_col`), plus on `remove_unbalanced` and `get_summary` — work directly with pre-aggregated data in any schema.
+- **Unbalanced panel support** via `balanced=False`: bilateral indices and GEKS links are computed on the products matched between the periods involved (Törnqvist expenditure shares re-normalise over the matched set; GEKS averages over available links; Geary-Khamis iterates over observed cells). `panel_warnings=True` reports how many products each comparison drops. The time-product-dummy method handles unbalanced panels natively and needs no flag.
+- Clear up-front errors for unbalanced input under the default `balanced=True` (previously Geary-Khamis failed with a misleading convergence error).
 
 ## Installation
 
@@ -112,25 +129,32 @@ extended_idx = pin.movement_splice(geks_fisher_idx1, geks_fisher_idx2)
 
 ## Data Requirements
 
-Your data should contain:
+Raw transaction data should contain a date column, a numeric price column, a unique product ID and (for weighted indices) a quantity column — `standardize_columns` maps these to the standard names via its `date_col`/`price_col`/`id_col`/`quantity_col` arguments.
 
-- **Date column**: Date or datetime values
-- **Price column**: Numeric price observations
-- **Product ID column**: Unique identifier for each product/variety
-- **Quantity column**: Numeric quantities (required for weighted indices, optional for unweighted methods like GEKS-Jevons)
+Every index function then consumes the aggregated panel produced by `aggregate_time`, with one observation per product and period:
 
-Example data structure:
 ```
-┌────────────┬────────────┬───────┬──────────┐
-│ date       ┆ product_id ┆ price ┆ quantity │
-│ ---        ┆ ---        ┆ ---   ┆ ---      │
-│ date       ┆ str        ┆ f64   ┆ f64      │
-╞════════════╪════════════╪═══════╪══════════╡
-│ 2023-01-01 ┆ A          ┆ 100.0 ┆ 10.0     │
-│ 2023-01-01 ┆ B          ┆ 200.0 ┆ 5.0      │
-│ 2023-02-01 ┆ A          ┆ 105.0 ┆ 12.0     │
-│ 2023-02-01 ┆ B          ┆ 210.0 ┆ 4.5      │
-└────────────┴────────────┴────────────┴──────────┘
+┌────────────┬────────────┬───────────────────┬───────────────────────┐
+│ product_id ┆ period     ┆ aggregated_price  ┆ aggregated_quantity   │
+│ ---        ┆ ---        ┆ ---               ┆ ---                   │
+│ str        ┆ date       ┆ f64               ┆ f64                   │
+╞════════════╪════════════╪═══════════════════╪═══════════════════════╡
+│ A          ┆ 2023-01-01 ┆ 100.0             ┆ 10.0                  │
+│ B          ┆ 2023-01-01 ┆ 200.0             ┆ 5.0                   │
+│ A          ┆ 2023-02-01 ┆ 105.0             ┆ 12.0                  │
+│ B          ┆ 2023-02-01 ┆ 210.0             ┆ 4.5                   │
+└────────────┴────────────┴───────────────────┴───────────────────────┘
+```
+
+Already have aggregated data with different column names? Pass them explicitly — no renaming, no re-aggregation:
+
+```python
+geks_fisher_idx = pin.geks_fisher(
+    df,
+    period_col="month", price_col="avg_price",
+    id_col="sku", quantity_col="total_qty",
+    balanced=False,
+)
 ```
 
 ## API Overview
@@ -152,7 +176,7 @@ df_imputed = pin.carry_forward_imputation(df_agg, ["aggregated_price", "aggregat
 ### Index Calculation
 
 ```python
-# Bilateral indices
+# Bilateral indices (exactly two periods)
 jevons = pin.jevons(df)
 laspeyres = pin.laspeyres(df)
 fisher = pin.fisher(df)
@@ -163,6 +187,10 @@ gk = pin.geary_khamis(df)
 
 # Unweighted multilateral index (no quantity required)
 geks_j = pin.geks_jevons(df)
+
+# Unbalanced panels: compute on matched products, no imputation
+fisher = pin.fisher(df, balanced=False, panel_warnings=True)
+geks = pin.geks_fisher(df, balanced=False)
 ```
 
 ### Extensions
@@ -213,7 +241,7 @@ If you use PyIndexNum in your research, please cite:
   title = {PyIndexNum: A Python Library for Economic Index Numbers},
   author = {Palumbo, Luigi, and Yu, Mengting},
   url = {https://github.com/paluigi/PyIndexNum},
-  version = {0.3.0},
+  version = {0.4.0},
 }
 ```
 

@@ -17,6 +17,14 @@ A high-performance Python library for calculating economic index numbers using P
 - **Extension Methods**: Support for index splicing and rolling window calculations
 - **Type Safety**: Full type annotations for better IDE support and code reliability
 
+## What's new in 0.5.0
+
+**Experimental spatial indices.** New `geks_paasche` and `geks_laspeyres` multilateral price indices for cross-region (spatial) comparisons, in the new `pyindexnum.experimental` module. They use the bridge-averaged regression form (Białek's 2022 GEKS-L and its Paasche mirror) because Paasche and Laspeyres bilaterals do not satisfy country reversal; the results are transitive and base invariant without requiring it, and reduce to the bilateral Fisher index when only two regions are compared.
+
+- **Spatial-first API**: `entity_col` (default `"region"`), an explicit `base_entity`, and matched-sample support for unbalanced regional panels (`panel_warnings=True` summarises dropped products). Data from the temporal pipeline needs one rename: `df.rename({"period": "region"})`.
+- Unbalanced panels are handled on matched product sets: each bilateral link uses the products matched between its two regions, entity pairs sharing no products are skipped, and a region connected to no other raises a clear error.
+- Dedicated [user guide page](https://pyindexnum.readthedocs.io/en/latest/user_guide/experimental_spatial.html) and test suite; the API is experimental and may change in future releases.
+
 ## What's new in 0.4.0
 
 **Breaking change — one unified input schema.** All index functions (bilateral and multilateral) now consume the panel schema produced by `aggregate_time`: `product_id`, `period`, `aggregated_price`, `aggregated_quantity`. The output of `aggregate_time` feeds every index function directly, with no renaming. Bilateral functions previously required `date`/`price`/`quantity` columns; existing code migrates in one line:
@@ -126,6 +134,29 @@ extended_idx = pin.movement_splice(geks_fisher_idx1, geks_fisher_idx2)
 - **Half Splice**: Half-year overlapping windows
 - **Mean Splice**: Average of overlapping windows
 - **Fixed Base Rolling Window**: Rolling window with fixed base
+
+### Experimental: Spatial Indices
+
+Multilateral indices for cross-region (spatial) price comparisons, built on
+the bridge-averaged regression form because Paasche and Laspeyres bilaterals
+do not satisfy country reversal. Their API is experimental and may change;
+see the [spatial indices guide](https://pyindexnum.readthedocs.io/en/latest/user_guide/experimental_spatial.html) for details.
+
+| Index | Method | Description |
+|-------|--------|-------------|
+| **GEKS-Paasche** | Bridge-averaged Paasche bilaterals | Every link into a region uses that region's own basket |
+| **GEKS-Laspeyres** | Bridge-averaged Laspeyres bilaterals | Białek's (2022) GEKS-L over regions: every link uses the bridge region's basket |
+
+```python
+import pyindexnum as pin
+
+# Spatial data: a region column replaces the period column. Data from the
+# temporal pipeline needs one rename first:
+df_region = df_agg.rename({"period": "region"})
+
+paasche = pin.geks_paasche(df_region, base_entity="North")
+laspeyres = pin.geks_laspeyres(df_region, base_entity="North")
+```
 
 ## Data Requirements
 
@@ -241,7 +272,7 @@ If you use PyIndexNum in your research, please cite:
   title = {PyIndexNum: A Python Library for Economic Index Numbers},
   author = {Palumbo, Luigi, and Yu, Mengting},
   url = {https://github.com/paluigi/PyIndexNum},
-  version = {0.4.0},
+  version = {0.5.0},
 }
 ```
 

@@ -9,6 +9,8 @@ Core Modules
 .. toctree::
    :maxdepth: 1
 
+   experimental
+
 pyindexnum.utils
 ----------------
 

@@ -16,5 +16,6 @@ from .utils import (
 from .bilateral import jevons, dutot, carli, laspeyres, paasche, fisher, tornqvist, walsh
 from .multilateral import geks_fisher, geks_tornqvist, geks_jevons, geary_khamis, time_product_dummy
 from .extension import movement_splice, window_splice, half_splice, mean_splice, fixed_base_rolling_window
+from .experimental import geks_paasche, geks_laspeyres
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
